@@ -8,11 +8,7 @@
 ![WireGuard](https://img.shields.io/badge/WireGuard-881798?style=for-the-badge&logo=wireguard&logoColor=white)
 ![Downloads](https://img.shields.io/github/downloads/Canned-F0xy/HIDEOUT/total.svg?style=for-the-badge&color=yellow&label=다운로드)
 
-![Screenshot_20260728_121019_HIDEOUT.png](https://github.com/user-attachments/assets/c4032aca-6881-4d9d-8594-d60dbf654af0)
-
-![Screenshot_20260728_121045_HIDEOUT.png](https://github.com/user-attachments/assets/640f2038-6138-4c47-a7da-93c656f08e43)
-
-![Screenshot_20260728_121049_HIDEOUT.png](https://github.com/user-attachments/assets/30939aa7-779d-4b51-b126-9212420d2de2)
+![26-07-28_12-17-40-881.png](https://github.com/user-attachments/assets/c06c40ec-0ec1-426c-adc2-8fbef78dbbcc)
 
 **HIDEOUT**은 제약 없이 안전하게 e621을 탐색할 수 있도록 설계된 안드로이드 전용 클라이언트 앱입니다.
 
