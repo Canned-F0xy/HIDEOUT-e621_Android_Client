@@ -466,7 +466,7 @@ object VpnManager {
     fun stopVpnSync(context: Context) {
         try {
             getBackend(context).setState(tunnel, Tunnel.State.DOWN, null)
-        } catch (e: Exception) { e.printStackTrace() }
+        } catch (e: Exception) {}
     }
 }
 
@@ -528,7 +528,7 @@ suspend fun autoConnectMullvad(
                 AllowedIPs = 0.0.0.0/0
             """.trimIndent()
 
-            prefs.edit().putString("vpnConfigText", configText).apply()
+            encryptedPrefs.edit().putString("vpnConfigText", configText).apply()
 
             val config = Config.parse(configText.byteInputStream(Charsets.UTF_8))
             val backend = VpnManager.getBackend(context)
@@ -538,7 +538,6 @@ suspend fun autoConnectMullvad(
 
             return@withContext true
         } catch (e: Exception) {
-            e.printStackTrace()
             return@withContext false
         }
     }
@@ -661,7 +660,7 @@ fun MainApp(
                     if (currentVersion.isNotBlank() && latestVersion != currentVersion.replace("v", "")) {
                         updateRelease = release
                     }
-                } catch (e: Exception) { e.printStackTrace() }
+                } catch (e: Exception) {}
             }
         }
     }
@@ -690,7 +689,7 @@ fun MainApp(
             }
         }
 
-        val savedConfigText = prefs.getString("vpnConfigText", null)
+        val savedConfigText = encryptedPrefs.getString("vpnConfigText", null)
         if (savedConfigText != null) {
             try {
                 val config = Config.parse(savedConfigText.byteInputStream(Charsets.UTF_8))
@@ -704,7 +703,7 @@ fun MainApp(
                         } catch (e: Exception) {}
                     }
                 }
-            } catch (e: Exception) { e.printStackTrace() }
+            } catch (e: Exception) {}
         }
     }
 
@@ -813,7 +812,6 @@ fun MainApp(
                 if (page == 1) posts = response.posts else posts = posts + response.posts
 
             } catch (e: Exception) {
-                e.printStackTrace()
                 errorMessage = when {
                     e is retrofit2.HttpException && e.code() == 401 -> {
                         loginUsername = ""
@@ -876,13 +874,12 @@ fun MainApp(
                 if (inputStream != null) {
                     val text = inputStream.bufferedReader(Charsets.UTF_8).use { reader -> reader.readText() }
                     val cleanText = text.replace("\uFEFF", "").trim()
-                    prefs.edit().putString("vpnConfigText", cleanText).apply()
+                    encryptedPrefs.edit().putString("vpnConfigText", cleanText).apply()
                     vpnConfig = Config.parse(cleanText.byteInputStream(Charsets.UTF_8))
                     vpnErrorMessage = null
                     Toast.makeText(context, strings.configSaved, Toast.LENGTH_SHORT).show()
                 } else { vpnErrorMessage = strings.fileReadFailed }
             } catch (e: Exception) {
-                e.printStackTrace()
                 vpnErrorMessage = strings.parseFailed
             }
         }
@@ -1137,6 +1134,8 @@ fun CloudflareBypassDialog(onSuccess: (String) -> Unit, onCancel: () -> Unit) {
                             settings.javaScriptEnabled = true
                             settings.domStorageEnabled = true
                             settings.userAgentString = NetworkModule.DEFAULT_USER_AGENT
+                            settings.allowFileAccess = false
+                            settings.allowContentAccess = false
                             val cookieManager = CookieManager.getInstance()
                             cookieManager.setAcceptCookie(true)
                             webViewClient = object : WebViewClient() {
@@ -1355,7 +1354,7 @@ fun GalleryScreen(
                     Image(painter = painterResource(id = R.drawable.ic_launcher2), contentDescription = strings.cdLogo, modifier = Modifier.size(64.dp).clip(RoundedCornerShape(12.dp)))
                     Spacer(modifier = Modifier.height(12.dp))
                     Text("HIDEOUT", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black, letterSpacing = 2.sp), color = NeonOrange)
-                    Text("Ver. 2026-07-29", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Ver. 2026-07-29 A1", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                 Spacer(modifier = Modifier.height(8.dp))
@@ -1824,6 +1823,9 @@ fun downloadMediaWithRange(context: Context, url: String, fileName: String, md5:
                         val targetDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
                         val hideoutDir = File(targetDir, "HIDEOUT")
                         if (!hideoutDir.exists()) hideoutDir.mkdirs()
+                        val nomediaFile = File(hideoutDir, ".nomedia")
+                        if (!nomediaFile.exists()) nomediaFile.createNewFile()
+
                         val destFile = File(hideoutDir, fileName)
                         cached.copyTo(destFile, overwrite = true)
                         val scanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
@@ -1884,6 +1886,9 @@ fun downloadMediaWithRange(context: Context, url: String, fileName: String, md5:
                 val targetDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
                 val hideoutDir = File(targetDir, "HIDEOUT")
                 if (!hideoutDir.exists()) hideoutDir.mkdirs()
+                val nomediaFile = File(hideoutDir, ".nomedia")
+                if (!nomediaFile.exists()) nomediaFile.createNewFile()
+
                 val destFile = File(hideoutDir, fileName)
                 tempFile.copyTo(destFile, overwrite = true)
                 val scanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
