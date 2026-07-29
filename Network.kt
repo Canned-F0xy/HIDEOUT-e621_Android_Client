@@ -171,6 +171,6 @@ suspend fun checkGithubUpdate(): GithubRelease? = withContext(Dispatchers.IO) {
             val body = response.body?.string() ?: return@withContext null
             return@withContext Gson().fromJson(body, GithubRelease::class.java)
         }
-    } catch(e: Exception) { e.printStackTrace() }
+    } catch(e: Exception) {}
     return@withContext null
 }
