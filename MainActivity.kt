@@ -96,6 +96,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.Locale
 
 val NeonOrange = Color(0xFFFF6B00)
@@ -211,6 +215,14 @@ interface AppStrings {
     val connectLabel: String
     val loginFailedMullvad: String
     val viewAllRelated: String
+    val cacheManagement: String
+    val cacheSizeLabel: String
+    val clearCache: String
+    val cacheCleared: String
+    val updateAvailable: String
+    fun updateMessage(ver: String): String
+    val updateButton: String
+    val laterButton: String
 }
 
 object KoStrings : AppStrings {
@@ -307,10 +319,18 @@ object KoStrings : AppStrings {
     override val connectLabel = "연결하기"
     override val loginFailedMullvad = "인증 실패: 번호나 기기 제한(5대)을 확인하세요."
     override val viewAllRelated = "모든 연관 포스트 보기"
+    override val cacheManagement = "캐시 관리"
+    override val cacheSizeLabel = "캐시 용량: "
+    override val clearCache = "캐시 비우기"
+    override val cacheCleared = "캐시가 삭제되었습니다."
+    override val updateAvailable = "새로운 업데이트가 있습니다!"
+    override fun updateMessage(ver: String) = "새로운 버전 $ver 이 배포되었습니다. 다운로드하시겠습니까?"
+    override val updateButton = "업데이트"
+    override val laterButton = "나중에"
 }
 
 object EnStrings : AppStrings {
-    override val hideoutSetup = "Hideout Setup"
+    override val hideoutSetup = "HIDEOUT Setup"
     override val vpnWarning = "Due to South Korean legal regulations,\na VPN initial setup is required to access e621.\nIf using an external VPN, please tap 'Skip Setup'."
     override val selectConfig = "Select Config File"
     override val changeConfig = "Change Config File"
@@ -403,6 +423,14 @@ object EnStrings : AppStrings {
     override val connectLabel = "Connect"
     override val loginFailedMullvad = "Auth failed: Check account or device limit (max 5)."
     override val viewAllRelated = "View All Related Posts"
+    override val cacheManagement = "Cache Management"
+    override val cacheSizeLabel = "Cache Size: "
+    override val clearCache = "Clear Cache"
+    override val cacheCleared = "Cache cleared."
+    override val updateAvailable = "New update available!"
+    override fun updateMessage(ver: String) = "Version $ver has been released. Would you like to download it?"
+    override val updateButton = "Update"
+    override val laterButton = "Later"
 }
 
 val LocalStrings = staticCompositionLocalOf<AppStrings> { KoStrings }
@@ -524,6 +552,32 @@ fun formatDuration(seconds: Double?): String {
     return String.format(Locale.US, "%d:%02d", m, s)
 }
 
+fun getCachedFile(context: Context, md5: String?, ext: String): File? {
+    if (md5.isNullOrBlank()) return null
+    val cacheDir = File(context.cacheDir, "e621_media_cache")
+    if (!cacheDir.exists()) return null
+    val file = File(cacheDir, "$md5.$ext")
+    return if (file.exists() && file.length() > 0) file else null
+}
+
+fun getCacheDirSize(context: Context): Long {
+    val cacheDir = context.cacheDir
+    if (!cacheDir.exists()) return 0L
+    return cacheDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+}
+
+fun formatByteSize(bytes: Long): String {
+    val kb = bytes / 1024.0
+    val mb = kb / 1024.0
+    val gb = mb / 1024.0
+    return when {
+        gb >= 1.0 -> String.format(Locale.US, "%.2f GB", gb)
+        mb >= 1.0 -> String.format(Locale.US, "%.2f MB", mb)
+        kb >= 1.0 -> String.format(Locale.US, "%.2f KB", kb)
+        else -> "$bytes Bytes"
+    }
+}
+
 class MainActivity : ComponentActivity() {
 
     @OptIn(DelicateCoroutinesApi::class)
@@ -593,6 +647,24 @@ fun MainApp(
     var cfClearanceCookie by remember { mutableStateOf(encryptedPrefs.getString("cfClearance", "") ?: "") }
     var showCaptchaDialog by remember { mutableStateOf(false) }
     var hasCheckedCaptchaOnStartup by remember { mutableStateOf(false) }
+
+    var updateRelease by remember { mutableStateOf<GithubRelease?>(null) }
+
+    LaunchedEffect(Unit) {
+        scope.launch {
+            val release = checkGithubUpdate()
+            if (release != null) {
+                try {
+                    val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+                    val currentVersion = packageInfo.versionName ?: ""
+                    val latestVersion = release.tag_name.replace("v", "")
+                    if (currentVersion.isNotBlank() && latestVersion != currentVersion.replace("v", "")) {
+                        updateRelease = release
+                    }
+                } catch (e: Exception) { e.printStackTrace() }
+            }
+        }
+    }
 
     LaunchedEffect(loginUsername, loginApiKey, cfClearanceCookie) {
         NetworkModule.username = loginUsername
@@ -664,6 +736,28 @@ fun MainApp(
     var isLastPage by remember { mutableStateOf(false) }
 
     val gridState = rememberLazyStaggeredGridState()
+
+    if (updateRelease != null) {
+        AlertDialog(
+            onDismissRequest = { updateRelease = null },
+            title = { Text(strings.updateAvailable, color = NeonOrange) },
+            text = { Text(strings.updateMessage(updateRelease!!.tag_name), color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(updateRelease!!.html_url))
+                        context.startActivity(intent)
+                        updateRelease = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonOrange)
+                ) { Text(strings.updateButton, color = DeepBlack, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { updateRelease = null }) { Text(strings.laterButton, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            },
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    }
 
     if (showCaptchaDialog) {
         CloudflareBypassDialog(
@@ -1186,6 +1280,7 @@ fun GalleryScreen(
             }
         }
         val savedTreeUri = prefs.getString("downloadTreeUri", "") ?: ""
+        var currentCacheSize by remember(showSettingsDialog) { mutableStateOf(getCacheSizeString(context)) }
 
         AlertDialog(
             onDismissRequest = { showSettingsDialog = false },
@@ -1212,12 +1307,25 @@ fun GalleryScreen(
                         }
                     }
 
+                    Spacer(Modifier.height(16.dp))
+                    Text(strings.cacheManagement, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("${strings.cacheSizeLabel}$currentCacheSize", color = MaterialTheme.colorScheme.onSurface)
+                        OutlinedButton(onClick = {
+                            context.cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                            currentCacheSize = getCacheSizeString(context)
+                            Toast.makeText(context, strings.cacheCleared, Toast.LENGTH_SHORT).show()
+                        }) {
+                            Text(strings.clearCache, color = Color.Red)
+                        }
+                    }
+
                     Spacer(Modifier.height(24.dp))
                     HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                     Spacer(Modifier.height(8.dp))
                     OutlinedButton(
                         onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Canned-F0xy"))
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Canned-F0xy/HIDEOUT-e621_Android_Client"))
                             context.startActivity(intent)
                         },
                         modifier = Modifier.fillMaxWidth(),
@@ -1247,7 +1355,7 @@ fun GalleryScreen(
                     Image(painter = painterResource(id = R.drawable.ic_launcher2), contentDescription = strings.cdLogo, modifier = Modifier.size(64.dp).clip(RoundedCornerShape(12.dp)))
                     Spacer(modifier = Modifier.height(12.dp))
                     Text("HIDEOUT", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black, letterSpacing = 2.sp), color = NeonOrange)
-                    Text("Ver. 2026-07-10", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Ver. 2026-07-29", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                 Spacer(modifier = Modifier.height(8.dp))
@@ -1393,14 +1501,21 @@ fun GalleryScreen(
                     ) {
                         itemsIndexed(posts, key = { _, post -> post.id }) { index, post ->
                             if (index >= posts.size - 1 && !isLoading && errorMessage == null && !isLastPage) LaunchedEffect(Unit) { onLoadMore() }
-                            post.preview.url?.let { imageUrl ->
+                            val cachedFile = getCachedFile(context, post.file.md5, post.file.ext)
+                            val imageModel = cachedFile ?: post.preview.url
+
+                            imageModel?.let { imageUrl ->
+                                val imageRequest = remember(imageUrl) {
+                                    ImageRequest.Builder(context).data(imageUrl).crossfade(200).build()
+                                }
+
                                 Card(
                                     modifier = Modifier.fillMaxWidth().clickable { focusManager.clearFocus(force = true); keyboardController?.hide(); onPostClick(index) },
                                     shape = RoundedCornerShape(12.dp), elevation = CardDefaults.cardElevation(0.dp),
                                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                                 ) {
                                     Box(modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp)) {
-                                        AsyncImage(model = ImageRequest.Builder(context).data(imageUrl).crossfade(500).build(), contentDescription = "${strings.idLabel(post.id)}", modifier = Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
+                                        AsyncImage(model = imageRequest, contentDescription = "${strings.idLabel(post.id)}", modifier = Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
                                         Box(modifier = Modifier.align(Alignment.BottomStart).padding(6.dp).background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
                                             Text(post.file.ext.uppercase(), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                         }
@@ -1465,12 +1580,15 @@ fun DetailScreen(post: Post, isActivePage: Boolean, prefs: android.content.Share
     var isFavorited by remember(post.id, post.is_favorited) { mutableStateOf(post.is_favorited) }
     var currentScore by remember(post.id, post.score.total) { mutableIntStateOf(post.score.total) }
 
+    val cachedFile = getCachedFile(context, post.file.md5, post.file.ext)
+
     val gifEnabledLoader = remember { ImageLoader.Builder(context).okHttpClient(NetworkModule.client).components { if (SDK_INT >= 28) add(ImageDecoderDecoder.Factory()) else add(GifDecoder.Factory()) }.build() }
 
     val exoPlayer = remember(post.id) {
         if ((post.file.ext == "webm" || post.file.ext == "mp4") && post.file.url != null) {
             ExoPlayer.Builder(context).build().apply {
-                setMediaItem(MediaItem.fromUri(post.file.url))
+                val mediaUri = if (cachedFile != null) Uri.fromFile(cachedFile) else Uri.parse(post.file.url)
+                setMediaItem(MediaItem.fromUri(mediaUri))
                 prepare()
                 playWhenReady = false
                 repeatMode = Player.REPEAT_MODE_ALL
@@ -1501,7 +1619,11 @@ fun DetailScreen(post: Post, isActivePage: Boolean, prefs: android.content.Share
                     }
                 }
             } else {
-                ZoomableImage(imageUrl = post.file.url, imageLoader = gifEnabledLoader, onClose = { isFullScreen = false })
+                ZoomableImage(
+                    imageUrl = if (cachedFile != null) cachedFile.absolutePath else post.file.url,
+                    imageLoader = gifEnabledLoader,
+                    onClose = { isFullScreen = false }
+                )
             }
         }
     }
@@ -1538,7 +1660,7 @@ fun DetailScreen(post: Post, isActivePage: Boolean, prefs: android.content.Share
                     if (post.file.url != null) {
                         IconButton(onClick = {
                             val treeUriStr = prefs.getString("downloadTreeUri", "") ?: ""
-                            downloadImage(context, post.file.url, "Hideout_${post.id}.${post.file.ext}", treeUriStr, encryptedPrefs, strings)
+                            downloadMediaWithRange(context, post.file.url, "Hideout_${post.id}.${post.file.ext}", post.file.md5, post.file.ext, treeUriStr, encryptedPrefs, strings)
                         }) { Icon(Icons.Default.Download, contentDescription = strings.cdDownload, tint = NeonOrange) }
                     }
                 },
@@ -1561,7 +1683,16 @@ fun DetailScreen(post: Post, isActivePage: Boolean, prefs: android.content.Share
                         }
                     }
                 } else if (post.file.url != null) {
-                    AsyncImage(model = post.file.url, imageLoader = gifEnabledLoader, contentDescription = "Full Image", modifier = Modifier.fillMaxSize().clickable { isFullScreen = true }, contentScale = ContentScale.Fit)
+                    val detailImageRequest = remember(cachedFile, post.file.url) {
+                        ImageRequest.Builder(context).data(cachedFile ?: post.file.url).crossfade(200).build()
+                    }
+                    AsyncImage(
+                        model = detailImageRequest,
+                        imageLoader = gifEnabledLoader,
+                        contentDescription = "Full Image",
+                        modifier = Modifier.fillMaxSize().clickable { isFullScreen = true },
+                        contentScale = ContentScale.Fit
+                    )
                 }
             }
 
@@ -1630,7 +1761,7 @@ fun ZoomableImage(imageUrl: String, imageLoader: ImageLoader, onClose: () -> Uni
                 }
             }
     ) {
-        AsyncImage(model = imageUrl, imageLoader = imageLoader, contentDescription = "Zoomable Image", modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y), contentScale = ContentScale.Fit)
+        AsyncImage(model = if (imageUrl.startsWith("/")) File(imageUrl) else imageUrl, imageLoader = imageLoader, contentDescription = "Zoomable Image", modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y), contentScale = ContentScale.Fit)
         IconButton(onClick = onClose, modifier = Modifier.align(Alignment.TopEnd).systemBarsPadding().padding(16.dp)) { Icon(Icons.Default.Close, contentDescription = strings.cdClose, tint = Color.White) }
     }
 }
@@ -1681,54 +1812,109 @@ fun VideoPlayer(exoPlayer: ExoPlayer) {
     )
 }
 
-fun downloadImage(context: Context, url: String, fileName: String, treeUriStr: String, encryptedPrefs: android.content.SharedPreferences, strings: AppStrings) {
+fun downloadMediaWithRange(context: Context, url: String, fileName: String, md5: String?, ext: String, treeUriStr: String, encryptedPrefs: android.content.SharedPreferences, strings: AppStrings) {
     val cfClearanceCookie = encryptedPrefs.getString("cfClearance", "") ?: ""
 
-    if (treeUriStr.isEmpty()) {
-        try {
-            val request = DownloadManager.Request(Uri.parse(url))
-                .setTitle(strings.savingPost).setDescription(fileName)
-                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setDestinationInExternalPublicDir(Environment.DIRECTORY_PICTURES, "HIDEOUT/$fileName")
-                .setAllowedOverMetered(true).setAllowedOverRoaming(true)
-                .addRequestHeader("User-Agent", NetworkModule.DEFAULT_USER_AGENT)
+    if (!md5.isNullOrBlank()) {
+        val cached = getCachedFile(context, md5, ext)
+        if (cached != null) {
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    if (treeUriStr.isEmpty()) {
+                        val targetDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+                        val hideoutDir = File(targetDir, "HIDEOUT")
+                        if (!hideoutDir.exists()) hideoutDir.mkdirs()
+                        val destFile = File(hideoutDir, fileName)
+                        cached.copyTo(destFile, overwrite = true)
+                        val scanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
+                        scanIntent.data = Uri.fromFile(destFile)
+                        context.sendBroadcast(scanIntent)
+                    } else {
+                        val treeUri = Uri.parse(treeUriStr)
+                        val documentId = android.provider.DocumentsContract.getTreeDocumentId(treeUri)
+                        val docUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
+                        val newDocUri = android.provider.DocumentsContract.createDocument(context.contentResolver, docUri, "*/*", fileName)
+                        if (newDocUri != null) {
+                            context.contentResolver.openOutputStream(newDocUri)?.use { out ->
+                                cached.inputStream().use { it.copyTo(out) }
+                            }
+                        }
+                    }
+                    withContext(Dispatchers.Main) { Toast.makeText(context, strings.downloadComplete, Toast.LENGTH_SHORT).show() }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) { Toast.makeText(context, strings.downloadFailed(e.localizedMessage ?: ""), Toast.LENGTH_SHORT).show() }
+                }
+            }
+            return
+        }
+    }
 
+    CoroutineScope(Dispatchers.IO).launch {
+        try {
+            withContext(Dispatchers.Main) { Toast.makeText(context, strings.downloadStarting, Toast.LENGTH_SHORT).show() }
+
+            val tempFile = File(context.cacheDir, "temp_$fileName")
+            var downloadedBytes = if (tempFile.exists()) tempFile.length() else 0L
+
+            val connection = URL(url).openConnection() as HttpURLConnection
+            connection.setRequestProperty("User-Agent", NetworkModule.DEFAULT_USER_AGENT)
             if (cfClearanceCookie.isNotBlank() && cfClearanceCookie != "bypass") {
-                request.addRequestHeader("Cookie", cfClearanceCookie)
+                connection.setRequestProperty("Cookie", cfClearanceCookie)
+            }
+            if (downloadedBytes > 0) {
+                connection.setRequestProperty("Range", "bytes=$downloadedBytes-")
+            }
+            connection.connect()
+
+            val responseCode = connection.responseCode
+            val inputStream = if (responseCode == HttpURLConnection.HTTP_PARTIAL) {
+                connection.inputStream
+            } else {
+                downloadedBytes = 0L
+                tempFile.delete()
+                connection.inputStream
             }
 
-            (context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
-            Toast.makeText(context, strings.downloadStarting, Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) { Toast.makeText(context, strings.downloadFailed(e.localizedMessage ?: ""), Toast.LENGTH_SHORT).show() }
-    } else {
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                withContext(Dispatchers.Main) { Toast.makeText(context, strings.downloadStarting, Toast.LENGTH_SHORT).show() }
+            val outputStream = FileOutputStream(tempFile, downloadedBytes > 0)
+            inputStream.copyTo(outputStream)
+            inputStream.close()
+            outputStream.close()
+
+            if (treeUriStr.isEmpty()) {
+                val targetDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+                val hideoutDir = File(targetDir, "HIDEOUT")
+                if (!hideoutDir.exists()) hideoutDir.mkdirs()
+                val destFile = File(hideoutDir, fileName)
+                tempFile.copyTo(destFile, overwrite = true)
+                val scanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
+                scanIntent.data = Uri.fromFile(destFile)
+                context.sendBroadcast(scanIntent)
+            } else {
                 val treeUri = Uri.parse(treeUriStr)
                 val documentId = android.provider.DocumentsContract.getTreeDocumentId(treeUri)
                 val docUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
                 val newDocUri = android.provider.DocumentsContract.createDocument(context.contentResolver, docUri, "*/*", fileName)
-
                 if (newDocUri != null) {
-                    val connection = java.net.URL(url).openConnection()
-                    connection.setRequestProperty("User-Agent", NetworkModule.DEFAULT_USER_AGENT)
-
-                    if (cfClearanceCookie.isNotBlank() && cfClearanceCookie != "bypass") {
-                        connection.setRequestProperty("Cookie", cfClearanceCookie)
-                    }
-
-                    val inStream = connection.getInputStream()
-                    val outStream = context.contentResolver.openOutputStream(newDocUri)
-                    if (outStream != null) {
-                        inStream.copyTo(outStream)
-                        inStream.close()
-                        outStream.close()
-                        withContext(Dispatchers.Main) { Toast.makeText(context, strings.downloadComplete, Toast.LENGTH_SHORT).show() }
+                    context.contentResolver.openOutputStream(newDocUri)?.use { out ->
+                        tempFile.inputStream().use { it.copyTo(out) }
                     }
                 }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) { Toast.makeText(context, strings.downloadFailed(e.localizedMessage ?: ""), Toast.LENGTH_SHORT).show() }
             }
+
+            if (!md5.isNullOrBlank()) {
+                val cacheDir = File(context.cacheDir, "e621_media_cache")
+                if (!cacheDir.exists()) cacheDir.mkdirs()
+                val cacheFile = File(cacheDir, "$md5.$ext")
+                tempFile.copyTo(cacheFile, overwrite = true)
+            }
+
+            withContext(Dispatchers.Main) { Toast.makeText(context, strings.downloadComplete, Toast.LENGTH_SHORT).show() }
+        } catch (e: Exception) {
+            withContext(Dispatchers.Main) { Toast.makeText(context, strings.downloadFailed(e.localizedMessage ?: ""), Toast.LENGTH_SHORT).show() }
         }
     }
+}
+
+fun getCacheSizeString(context: Context): String {
+    return formatByteSize(getCacheDirSize(context))
 }
