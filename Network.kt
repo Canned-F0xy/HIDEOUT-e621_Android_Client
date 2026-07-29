@@ -15,6 +15,9 @@ import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
+import com.google.gson.Gson
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 data class E621Response(val posts: List<Post>)
 data class Post(
@@ -49,7 +52,7 @@ data class RelationshipsData(
     val children: List<Int> = emptyList()
 )
 
-data class FileData(val url: String?, val ext: String)
+data class FileData(val url: String?, val ext: String, val md5: String?)
 data class PreviewData(val url: String?)
 data class TagsData(val general: List<String> = emptyList(), val artist: List<String> = emptyList(), val character: List<String> = emptyList(), val copyright: List<String> = emptyList())
 data class ScoreData(val total: Int = 0)
@@ -63,6 +66,8 @@ data class MullvadRelay(
     val ipv4_addr_in: String,
     val pubkey: String
 )
+
+data class GithubRelease(val tag_name: String, val html_url: String)
 
 interface E621ApiService {
     @GET("posts.json")
@@ -153,4 +158,19 @@ object MullvadNetwork {
             .build()
             .create(MullvadApiService::class.java)
     }
+}
+
+suspend fun checkGithubUpdate(): GithubRelease? = withContext(Dispatchers.IO) {
+    try {
+        val client = OkHttpClient()
+        val request = okhttp3.Request.Builder()
+            .url("https://api.github.com/repos/Canned-F0xy/HIDEOUT-e621_Android_Client/releases/latest")
+            .build()
+        val response = client.newCall(request).execute()
+        if (response.isSuccessful) {
+            val body = response.body?.string() ?: return@withContext null
+            return@withContext Gson().fromJson(body, GithubRelease::class.java)
+        }
+    } catch(e: Exception) { e.printStackTrace() }
+    return@withContext null
 }
