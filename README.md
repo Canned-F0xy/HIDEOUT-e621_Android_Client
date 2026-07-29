@@ -1,6 +1,6 @@
 # 🦊 HIDEOUT (e621 Android Client)
 
-![Version](https://img.shields.io/badge/Version-2026--07--29--A1-FF6B00?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-2026--07--29-A1-FF6B00?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-GPL_3.0-blue?style=for-the-badge)
 ![Android](https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&logo=android&logoColor=white)
 ![Kotlin](https://img.shields.io/badge/Kotlin-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)
