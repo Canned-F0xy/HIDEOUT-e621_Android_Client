@@ -1,18 +1,23 @@
 package com.CannedF0xy.hideout
 
 import android.app.Activity
-import android.app.DownloadManager
 import android.app.Service
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.net.VpnService
 import android.os.Build.VERSION.SDK_INT
+import android.os.Build.VERSION_CODES
 import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
 import android.view.WindowManager
 import android.webkit.CookieManager
 import android.webkit.WebView
@@ -24,6 +29,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -37,7 +45,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
-import androidx.compose.foundation.lazy.staggeredgrid.itemsIndexed
 import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -59,6 +66,10 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
@@ -70,22 +81,31 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.datastore.preferences.core.*
+import androidx.datastore.preferences.preferencesDataStore
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
+import androidx.paging.LoadState
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.compose.LazyPagingItems
+import androidx.paging.compose.collectAsLazyPagingItems
+import androidx.paging.compose.itemKey
 import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
 import coil.request.ImageRequest
+import com.google.gson.Gson
+import com.google.gson.JsonParser
 import com.wireguard.android.backend.GoBackend
 import com.wireguard.android.backend.Tunnel
 import com.wireguard.config.Config
@@ -94,13 +114,21 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.KeyStore
 import java.util.Locale
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 
 val NeonOrange = Color(0xFFFF6B00)
 val PortalGrey = Color(0xFF8A8A8A)
@@ -150,6 +178,7 @@ interface AppStrings {
     val tagInputHint: String
     val appSettings: String
     val useDarkTheme: String
+    val useDynamicColor: String
     val downloadLocation: String
     val defaultFolder: String
     val customFolder: String
@@ -223,6 +252,14 @@ interface AppStrings {
     fun updateMessage(ver: String): String
     val updateButton: String
     val laterButton: String
+    val exportSettings: String
+    val importSettings: String
+    val exportSuccess: String
+    val importSuccess: String
+    val importFailed: String
+    val commentsTitle: String
+    val noComments: String
+    fun viewPool(poolId: Int): String
 }
 
 object KoStrings : AppStrings {
@@ -254,6 +291,7 @@ object KoStrings : AppStrings {
     override val tagInputHint = "태그 입력 (예: gore)"
     override val appSettings = "앱 설정"
     override val useDarkTheme = "다크 테마 사용"
+    override val useDynamicColor = "다이내믹 컬러 (Material You)"
     override val downloadLocation = "다운로드 저장 위치 (터치하여 탐색기에서 변경)"
     override val defaultFolder = "📁 기본 폴더 (Pictures/HIDEOUT)"
     override val customFolder = "📁 사용자 지정 폴더"
@@ -267,7 +305,7 @@ object KoStrings : AppStrings {
     override val manageBlacklist = "블랙리스트 태그 관리"
     override val r18ModeOn = "R-18 모드: ON"
     override val r18ModeOff = "R-18 모드: OFF"
-    override val appSettingsMenu = "앱 설정 (저장경로 / 테마)"
+    override val appSettingsMenu = "앱 설정 (저장경로 / 테마 / 백업)"
     override val disableWireGuard = "VPN 해제"
     override val enableWireGuard = "VPN 설정"
     override val searchTags = "태그 검색"
@@ -327,6 +365,14 @@ object KoStrings : AppStrings {
     override fun updateMessage(ver: String) = "새로운 버전 $ver 이 배포되었습니다. 다운로드하시겠습니까?"
     override val updateButton = "업데이트"
     override val laterButton = "나중에"
+    override val exportSettings = "설정 데이터 내보내기 (.json)"
+    override val importSettings = "설정 데이터 불러오기 (.json)"
+    override val exportSuccess = "설정 파일(.json)을 성공적으로 저장했습니다."
+    override val importSuccess = "데이터를 성공적으로 불러왔습니다."
+    override val importFailed = "데이터 불러오기에 실패했습니다. 올바른 파일인지 확인해주세요."
+    override val commentsTitle = "💬 댓글"
+    override val noComments = "등록된 댓글이 없습니다."
+    override fun viewPool(poolId: Int) = "📚 풀 (Pool #$poolId) 모아보기"
 }
 
 object EnStrings : AppStrings {
@@ -358,6 +404,7 @@ object EnStrings : AppStrings {
     override val tagInputHint = "Enter tag (e.g., gore)"
     override val appSettings = "App Settings"
     override val useDarkTheme = "Use Dark Theme"
+    override val useDynamicColor = "Dynamic Color (Material You)"
     override val downloadLocation = "Download Location (Tap to change)"
     override val defaultFolder = "📁 Default Folder (Pictures/HIDEOUT)"
     override val customFolder = "📁 Custom Folder"
@@ -371,7 +418,7 @@ object EnStrings : AppStrings {
     override val manageBlacklist = "Manage Blacklisted Tags"
     override val r18ModeOn = "R-18 Mode: ON"
     override val r18ModeOff = "R-18 Mode: OFF"
-    override val appSettingsMenu = "App Settings (Path / Theme)"
+    override val appSettingsMenu = "App Settings (Path / Theme / Backup)"
     override val disableWireGuard = "Disable VPN"
     override val enableWireGuard = "Enable VPN"
     override val searchTags = "Search Tags"
@@ -431,18 +478,171 @@ object EnStrings : AppStrings {
     override fun updateMessage(ver: String) = "Version $ver has been released. Would you like to download it?"
     override val updateButton = "Update"
     override val laterButton = "Later"
+    override val exportSettings = "Export Settings (.json)"
+    override val importSettings = "Import Settings (.json)"
+    override val exportSuccess = "Settings file (.json) exported successfully."
+    override val importSuccess = "Data imported successfully."
+    override val importFailed = "Failed to import data. Please check the file."
+    override val commentsTitle = "💬 Comments"
+    override val noComments = "No comments yet."
+    override fun viewPool(poolId: Int) = "📚 View Pool #$poolId"
 }
 
 val LocalStrings = staticCompositionLocalOf<AppStrings> { KoStrings }
 
-fun getEncryptedPrefs(context: Context): android.content.SharedPreferences {
-    val masterKey = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
-    return EncryptedSharedPreferences.create(
-        context, "SecretHideoutPrefs", masterKey,
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-    )
+val Context.dataStore by preferencesDataStore(name = "hideout_datastore")
+
+object CryptoHelper {
+    private const val KEY_ALIAS = "HideoutMasterKey"
+    private const val ANDROID_KEYSTORE = "AndroidKeyStore"
+    private const val TRANSFORMATION = "AES/GCM/NoPadding"
+
+    private fun getSecretKey(): SecretKey {
+        val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+        if (!keyStore.containsAlias(KEY_ALIAS)) {
+            val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
+            val spec = KeyGenParameterSpec.Builder(
+                KEY_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build()
+            keyGenerator.init(spec)
+            return keyGenerator.generateKey()
+        }
+        return (keyStore.getEntry(KEY_ALIAS, null) as KeyStore.SecretKeyEntry).secretKey
+    }
+
+    fun encrypt(plainText: String): String {
+        if (plainText.isEmpty()) return ""
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.ENCRYPT_MODE, getSecretKey())
+        val iv = cipher.iv
+        val encrypted = cipher.doFinal(plainText.toByteArray(Charsets.UTF_8))
+        val combined = iv + encrypted
+        return Base64.encodeToString(combined, Base64.NO_WRAP)
+    }
+
+    fun decrypt(encryptedBase64: String): String {
+        if (encryptedBase64.isEmpty()) return ""
+        return try {
+            val combined = Base64.decode(encryptedBase64, Base64.NO_WRAP)
+            if (combined.size < 12) return ""
+            val iv = combined.copyOfRange(0, 12)
+            val encryptedBytes = combined.copyOfRange(12, combined.size)
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            val spec = GCMParameterSpec(128, iv)
+            cipher.init(Cipher.DECRYPT_MODE, getSecretKey(), spec)
+            String(cipher.doFinal(encryptedBytes), Charsets.UTF_8)
+        } catch (e: Exception) { "" }
+    }
 }
+
+class AppPreferences(private val context: Context) {
+    companion object {
+        val KEY_DARK_THEME = booleanPreferencesKey("is_dark_theme")
+        val KEY_DYNAMIC_COLOR = booleanPreferencesKey("is_dynamic_color")
+        val KEY_APP_LANGUAGE = stringPreferencesKey("app_language")
+        val KEY_NSFW_ENABLED = booleanPreferencesKey("is_nsfw_enabled")
+        val KEY_DOWNLOAD_TREE_URI = stringPreferencesKey("download_tree_uri")
+        val KEY_BLACKLIST = stringSetPreferencesKey("blacklisted_tags")
+        val KEY_SEARCH_STACK = stringPreferencesKey("search_stack")
+        val KEY_VPN_BYPASSED = booleanPreferencesKey("is_vpn_bypassed")
+
+        val KEY_ENC_USERNAME = stringPreferencesKey("enc_username")
+        val KEY_ENC_API_KEY = stringPreferencesKey("enc_api_key")
+        val KEY_ENC_CF_CLEARANCE = stringPreferencesKey("enc_cf_clearance")
+        val KEY_ENC_VPN_CONFIG = stringPreferencesKey("enc_vpn_config")
+        val KEY_ENC_MULLVAD_PRIV = stringPreferencesKey("enc_mullvad_priv")
+        val KEY_ENC_MULLVAD_PUB = stringPreferencesKey("enc_mullvad_pub")
+    }
+
+    val isDarkTheme: Flow<Boolean> = context.dataStore.data.map { it[KEY_DARK_THEME] ?: true }
+    val isDynamicColor: Flow<Boolean> = context.dataStore.data.map { it[KEY_DYNAMIC_COLOR] ?: false }
+    val appLanguage: Flow<String> = context.dataStore.data.map { it[KEY_APP_LANGUAGE] ?: "ko" }
+    val isNsfwEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_NSFW_ENABLED] ?: false }
+    val downloadTreeUri: Flow<String> = context.dataStore.data.map { it[KEY_DOWNLOAD_TREE_URI] ?: "" }
+    val blacklistedTags: Flow<Set<String>> = context.dataStore.data.map { it[KEY_BLACKLIST] ?: emptySet() }
+    val searchStack: Flow<String> = context.dataStore.data.map { it[KEY_SEARCH_STACK] ?: "" }
+    val isVpnBypassed: Flow<Boolean> = context.dataStore.data.map { it[KEY_VPN_BYPASSED] ?: false }
+
+    val username: Flow<String> = context.dataStore.data.map { CryptoHelper.decrypt(it[KEY_ENC_USERNAME] ?: "") }
+    val apiKey: Flow<String> = context.dataStore.data.map { CryptoHelper.decrypt(it[KEY_ENC_API_KEY] ?: "") }
+    val cfClearance: Flow<String> = context.dataStore.data.map { CryptoHelper.decrypt(it[KEY_ENC_CF_CLEARANCE] ?: "") }
+    val vpnConfigText: Flow<String> = context.dataStore.data.map { CryptoHelper.decrypt(it[KEY_ENC_VPN_CONFIG] ?: "") }
+    val mullvadPrivKey: Flow<String> = context.dataStore.data.map { CryptoHelper.decrypt(it[KEY_ENC_MULLVAD_PRIV] ?: "") }
+    val mullvadPubKey: Flow<String> = context.dataStore.data.map { CryptoHelper.decrypt(it[KEY_ENC_MULLVAD_PUB] ?: "") }
+
+    suspend fun setDarkTheme(value: Boolean) = context.dataStore.edit { it[KEY_DARK_THEME] = value }
+    suspend fun setDynamicColor(value: Boolean) = context.dataStore.edit { it[KEY_DYNAMIC_COLOR] = value }
+    suspend fun setAppLanguage(value: String) = context.dataStore.edit { it[KEY_APP_LANGUAGE] = value }
+    suspend fun setNsfwEnabled(value: Boolean) = context.dataStore.edit { it[KEY_NSFW_ENABLED] = value }
+    suspend fun setDownloadTreeUri(value: String) = context.dataStore.edit { it[KEY_DOWNLOAD_TREE_URI] = value }
+    suspend fun setBlacklist(value: Set<String>) = context.dataStore.edit { it[KEY_BLACKLIST] = value }
+    suspend fun setSearchStack(value: String) = context.dataStore.edit { it[KEY_SEARCH_STACK] = value }
+    suspend fun setVpnBypassed(value: Boolean) = context.dataStore.edit { it[KEY_VPN_BYPASSED] = value }
+
+    suspend fun setCredentials(user: String, key: String) = context.dataStore.edit {
+        it[KEY_ENC_USERNAME] = CryptoHelper.encrypt(user)
+        it[KEY_ENC_API_KEY] = CryptoHelper.encrypt(key)
+    }
+
+    suspend fun setCfClearance(cookie: String) = context.dataStore.edit {
+        it[KEY_ENC_CF_CLEARANCE] = CryptoHelper.encrypt(cookie)
+    }
+
+    suspend fun setVpnConfig(configText: String) = context.dataStore.edit {
+        it[KEY_ENC_VPN_CONFIG] = CryptoHelper.encrypt(configText)
+    }
+
+    suspend fun setMullvadKeys(priv: String, pub: String) = context.dataStore.edit {
+        it[KEY_ENC_MULLVAD_PRIV] = CryptoHelper.encrypt(priv)
+        it[KEY_ENC_MULLVAD_PUB] = CryptoHelper.encrypt(pub)
+    }
+
+    suspend fun exportSettingsBase64(): String {
+        val data = context.dataStore.data.first()
+        val exportObj = ExportSettings(
+            darkTheme = data[KEY_DARK_THEME] ?: true,
+            dynamicColor = data[KEY_DYNAMIC_COLOR] ?: false,
+            lang = data[KEY_APP_LANGUAGE] ?: "ko",
+            downloadTreeUri = data[KEY_DOWNLOAD_TREE_URI] ?: "",
+            blacklist = (data[KEY_BLACKLIST] ?: emptySet()).toList()
+        )
+        val jsonString = Gson().toJson(exportObj)
+        val base64Str = Base64.encodeToString(jsonString.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+        return Gson().toJson(mapOf("backup_data" to base64Str))
+    }
+
+    suspend fun importSettingsBase64(fileContent: String): Boolean {
+        return try {
+            val wrapper = com.google.gson.JsonParser().parse(fileContent.trim()).asJsonObject
+            val base64Str = wrapper.get("backup_data").asString
+            val jsonString = String(Base64.decode(base64Str.trim(), Base64.NO_WRAP), Charsets.UTF_8)
+            val importObj = Gson().fromJson(jsonString, ExportSettings::class.java)
+            context.dataStore.edit {
+                it[KEY_DARK_THEME] = importObj.darkTheme
+                it[KEY_DYNAMIC_COLOR] = importObj.dynamicColor
+                it[KEY_APP_LANGUAGE] = importObj.lang
+                it[KEY_DOWNLOAD_TREE_URI] = importObj.downloadTreeUri
+                it[KEY_BLACKLIST] = importObj.blacklist.toSet()
+            }
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+}
+
+data class ExportSettings(
+    val darkTheme: Boolean,
+    val dynamicColor: Boolean,
+    val lang: String,
+    val downloadTreeUri: String,
+    val blacklist: List<String>
+)
 
 object VpnManager {
     private var backend: GoBackend? = null
@@ -486,26 +686,16 @@ class VpnCleanupService : Service() {
 suspend fun autoConnectMullvad(
     accountNumber: String,
     context: Context,
-    prefs: android.content.SharedPreferences,
-    encryptedPrefs: android.content.SharedPreferences
+    appPrefs: AppPreferences
 ): Boolean {
     return withContext(Dispatchers.IO) {
         try {
-            var privKey = encryptedPrefs.getString("mullvad_priv_key", null)
-            var pubKey = encryptedPrefs.getString("mullvad_pub_key", null)
-
-            if (privKey == null || pubKey == null) {
-                val keyPair = KeyPair()
-                privKey = keyPair.privateKey.toBase64()
-                pubKey = keyPair.publicKey.toBase64()
-                encryptedPrefs.edit()
-                    .putString("mullvad_priv_key", privKey)
-                    .putString("mullvad_pub_key", pubKey)
-                    .apply()
-            }
+            val privKey = KeyPair().privateKey.toBase64()
+            val pubKey = KeyPair().publicKey.toBase64()
+            appPrefs.setMullvadKeys(privKey, pubKey)
 
             val cleanAccount = accountNumber.replace(Regex("[^0-9]"), "")
-            val ipResponse = MullvadNetwork.api.registerKey(cleanAccount, pubKey!!)
+            val ipResponse = MullvadNetwork.api.registerKey(cleanAccount, pubKey)
 
             if (!ipResponse.isSuccessful) return@withContext false
 
@@ -528,7 +718,7 @@ suspend fun autoConnectMullvad(
                 AllowedIPs = 0.0.0.0/0
             """.trimIndent()
 
-            encryptedPrefs.edit().putString("vpnConfigText", configText).apply()
+            appPrefs.setVpnConfig(configText)
 
             val config = Config.parse(configText.byteInputStream(Charsets.UTF_8))
             val backend = VpnManager.getBackend(context)
@@ -551,8 +741,8 @@ fun formatDuration(seconds: Double?): String {
     return String.format(Locale.US, "%d:%02d", m, s)
 }
 
-fun getCachedFile(context: Context, md5: String?, ext: String): File? {
-    if (md5.isNullOrBlank()) return null
+fun getCachedFile(context: Context, md5: String?, ext: String?): File? {
+    if (md5.isNullOrBlank() || ext.isNullOrBlank()) return null
     val cacheDir = File(context.cacheDir, "e621_media_cache")
     if (!cacheDir.exists()) return null
     val file = File(cacheDir, "$md5.$ext")
@@ -593,29 +783,29 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val context = LocalContext.current
-            val prefs = remember { context.getSharedPreferences("HideoutPrefs", Context.MODE_PRIVATE) }
-            val encryptedPrefs = remember { getEncryptedPrefs(context) }
-            var isDarkTheme by remember { mutableStateOf(prefs.getBoolean("isDarkTheme", true)) }
-            var appLanguage by remember { mutableStateOf(prefs.getString("appLanguage", "ko") ?: "ko") }
+            val appPrefs = remember { AppPreferences(context) }
+
+            val isDarkTheme by appPrefs.isDarkTheme.collectAsState(initial = true)
+            val isDynamicColor by appPrefs.isDynamicColor.collectAsState(initial = false)
+            val appLanguage by appPrefs.appLanguage.collectAsState(initial = "ko")
 
             val currentStrings = if (appLanguage == "en") EnStrings else KoStrings
 
+            val colorScheme = if (isDynamicColor && SDK_INT >= VERSION_CODES.S) {
+                if (isDarkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+            } else {
+                if (isDarkTheme) HideoutDarkTheme else HideoutLightTheme
+            }
+
             CompositionLocalProvider(LocalStrings provides currentStrings) {
-                MaterialTheme(colorScheme = if (isDarkTheme) HideoutDarkTheme else HideoutLightTheme) {
+                MaterialTheme(colorScheme = colorScheme) {
                     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                         Box(modifier = Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
                             MainApp(
-                                prefs = prefs, encryptedPrefs = encryptedPrefs,
+                                appPrefs = appPrefs,
                                 isDarkTheme = isDarkTheme,
-                                onThemeToggle = {
-                                    isDarkTheme = !isDarkTheme
-                                    prefs.edit().putBoolean("isDarkTheme", isDarkTheme).apply()
-                                },
-                                appLanguage = appLanguage,
-                                onLanguageChange = { newLang ->
-                                    appLanguage = newLang
-                                    prefs.edit().putString("appLanguage", newLang).apply()
-                                }
+                                isDynamicColor = isDynamicColor,
+                                appLanguage = appLanguage
                             )
                         }
                     }
@@ -627,26 +817,30 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MainApp(
-    prefs: android.content.SharedPreferences,
-    encryptedPrefs: android.content.SharedPreferences,
+    appPrefs: AppPreferences,
     isDarkTheme: Boolean,
-    onThemeToggle: () -> Unit,
-    appLanguage: String,
-    onLanguageChange: (String) -> Unit
+    isDynamicColor: Boolean,
+    appLanguage: String
 ) {
     val context = LocalContext.current
     val activity = LocalContext.current as? Activity
     val scope = rememberCoroutineScope()
     val strings = LocalStrings.current
 
-    var isNsfwEnabled by remember { mutableStateOf(prefs.getBoolean("isNsfwEnabled", false)) }
-    var loginUsername by remember { mutableStateOf(encryptedPrefs.getString("username", "") ?: "") }
-    var loginApiKey by remember { mutableStateOf(encryptedPrefs.getString("apiKey", "") ?: "") }
-    var blacklistedTags by remember { mutableStateOf(prefs.getStringSet("blacklist", emptySet())?.toList() ?: emptyList()) }
-    var cfClearanceCookie by remember { mutableStateOf(encryptedPrefs.getString("cfClearance", "") ?: "") }
+    val isNsfwEnabled by appPrefs.isNsfwEnabled.collectAsState(initial = false)
+    val loginUsername by appPrefs.username.collectAsState(initial = "")
+    val loginApiKey by appPrefs.apiKey.collectAsState(initial = "")
+    val blacklistedTagsSet by appPrefs.blacklistedTags.collectAsState(initial = emptySet())
+    val cfClearanceCookie by appPrefs.cfClearance.collectAsState(initial = "")
+    val savedStackStr by appPrefs.searchStack.collectAsState(initial = "")
+    val isVpnBypassedPref by appPrefs.isVpnBypassed.collectAsState(initial = false)
+    val savedVpnConfigText by appPrefs.vpnConfigText.collectAsState(initial = "")
+
+    var isVpnBypassed by remember { mutableStateOf(false) }
+    LaunchedEffect(isVpnBypassedPref) { isVpnBypassed = isVpnBypassedPref }
+
     var showCaptchaDialog by remember { mutableStateOf(false) }
     var hasCheckedCaptchaOnStartup by remember { mutableStateOf(false) }
-
     var updateRelease by remember { mutableStateOf<GithubRelease?>(null) }
 
     LaunchedEffect(Unit) {
@@ -656,8 +850,25 @@ fun MainApp(
                 try {
                     val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
                     val currentVersion = packageInfo.versionName ?: ""
-                    val latestVersion = release.tag_name.replace("v", "")
-                    if (currentVersion.isNotBlank() && latestVersion != currentVersion.replace("v", "")) {
+                    val latestTag = release.tag_name
+
+                    fun extractNumbers(ver: String): List<Int> {
+                        return ver.split(Regex("[^0-9]+")).filter { it.isNotEmpty() }.map { it.toInt() }
+                    }
+
+                    val lParts = extractNumbers(latestTag)
+                    val cParts = extractNumbers(currentVersion)
+
+                    var isGreater = false
+                    val length = maxOf(lParts.size, cParts.size)
+                    for (i in 0 until length) {
+                        val l = lParts.getOrElse(i) { 0 }
+                        val c = cParts.getOrElse(i) { 0 }
+                        if (l > c) { isGreater = true; break }
+                        if (l < c) { isGreater = false; break }
+                    }
+
+                    if (isGreater) {
                         updateRelease = release
                     }
                 } catch (e: Exception) {}
@@ -677,22 +888,13 @@ fun MainApp(
 
     var vpnConfig by remember { mutableStateOf<Config?>(null) }
     var vpnErrorMessage by remember { mutableStateOf<String?>(null) }
-    var isVpnBypassed by remember { mutableStateOf(prefs.getBoolean("isVpnBypassed", false)) }
-
     var setupMode by remember { mutableStateOf<String?>(null) }
     var mullvadAccountInput by remember { mutableStateOf("") }
 
-    LaunchedEffect(Unit) {
-        NetworkModule.onCloudflareChallenge = {
-            scope.launch(Dispatchers.Main) {
-                showCaptchaDialog = true
-            }
-        }
-
-        val savedConfigText = encryptedPrefs.getString("vpnConfigText", null)
-        if (savedConfigText != null) {
+    LaunchedEffect(savedVpnConfigText) {
+        if (savedVpnConfigText.isNotBlank()) {
             try {
-                val config = Config.parse(savedConfigText.byteInputStream(Charsets.UTF_8))
+                val config = Config.parse(savedVpnConfigText.byteInputStream(Charsets.UTF_8))
                 vpnConfig = config
                 val intent = VpnService.prepare(context)
                 if (intent == null) {
@@ -707,6 +909,12 @@ fun MainApp(
         }
     }
 
+    LaunchedEffect(Unit) {
+        NetworkModule.onCloudflareChallenge = {
+            scope.launch(Dispatchers.Main) { showCaptchaDialog = true }
+        }
+    }
+
     LaunchedEffect(vpnState, isVpnBypassed) {
         if ((vpnState == Tunnel.State.UP || isVpnBypassed) && !hasCheckedCaptchaOnStartup) {
             if (cfClearanceCookie.isBlank()) {
@@ -716,30 +924,48 @@ fun MainApp(
         }
     }
 
-    val savedStackStr = prefs.getString("searchStack", "") ?: ""
-    var searchStack by remember { mutableStateOf(if (savedStackStr.isNotEmpty()) savedStackStr.split("||") else listOf("")) }
-
-    LaunchedEffect(searchStack) {
-        prefs.edit().putString("searchStack", searchStack.joinToString("||")).apply()
+    var searchStack by remember { mutableStateOf(listOf("")) }
+    LaunchedEffect(savedStackStr) {
+        if (savedStackStr.isNotEmpty()) {
+            searchStack = savedStackStr.split("||")
+        }
     }
 
     var searchInput by remember { mutableStateOf("") }
-    val currentTag = searchStack.last()
+    val currentTag = searchStack.lastOrNull() ?: ""
 
-    var posts by remember { mutableStateOf<List<Post>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var retryTrigger by remember { mutableStateOf(0) }
-    var page by remember { mutableStateOf(1) }
-    var selectedIndex by remember { mutableStateOf<Int?>(null) }
-    var isLastPage by remember { mutableStateOf(false) }
+    val blacklistedList = remember(blacklistedTagsSet) { blacklistedTagsSet.toList() }
 
+    val pager = remember(currentTag, isNsfwEnabled, blacklistedList) {
+        Pager(
+            config = PagingConfig(pageSize = 20, enablePlaceholders = false),
+            pagingSourceFactory = {
+                E621PagingSource(
+                    query = currentTag,
+                    isNsfwEnabled = isNsfwEnabled,
+                    blacklistedTags = blacklistedList,
+                    onAuthError = {
+                        scope.launch {
+                            appPrefs.setCredentials("", "")
+                            Toast.makeText(context, strings.loginFailed, Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    onCloudflareBlocked = {
+                        scope.launch(Dispatchers.Main) { showCaptchaDialog = true }
+                    }
+                )
+            }
+        )
+    }
+
+    val lazyPagingItems: LazyPagingItems<Post> = pager.flow.collectAsLazyPagingItems()
     val gridState = rememberLazyStaggeredGridState()
+    var selectedPostIndex by remember { mutableStateOf<Int?>(null) }
 
     if (updateRelease != null) {
         AlertDialog(
             onDismissRequest = { updateRelease = null },
-            title = { Text(strings.updateAvailable, color = NeonOrange) },
+            title = { Text(strings.updateAvailable, color = MaterialTheme.colorScheme.primary) },
             text = { Text(strings.updateMessage(updateRelease!!.tag_name), color = MaterialTheme.colorScheme.onSurfaceVariant) },
             confirmButton = {
                 Button(
@@ -748,8 +974,8 @@ fun MainApp(
                         context.startActivity(intent)
                         updateRelease = null
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = NeonOrange)
-                ) { Text(strings.updateButton, color = DeepBlack, fontWeight = FontWeight.Bold) }
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) { Text(strings.updateButton, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold) }
             },
             dismissButton = {
                 TextButton(onClick = { updateRelease = null }) { Text(strings.laterButton, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -762,81 +988,30 @@ fun MainApp(
         CloudflareBypassDialog(
             onSuccess = { newCookie ->
                 if (newCookie.isNotBlank()) {
-                    cfClearanceCookie = newCookie
+                    scope.launch { appPrefs.setCfClearance(newCookie) }
                     NetworkModule.cfClearance = newCookie
-                    encryptedPrefs.edit().putString("cfClearance", newCookie).apply()
                 }
                 showCaptchaDialog = false
-                retryTrigger++
+                lazyPagingItems.refresh()
             },
-            onCancel = {
-                showCaptchaDialog = false
-            }
+            onCancel = { showCaptchaDialog = false }
         )
     }
 
-    BackHandler(enabled = selectedIndex == null && searchStack.size > 1) {
-        searchStack = searchStack.dropLast(1)
-        val prevTag = searchStack.last()
+    BackHandler(enabled = selectedPostIndex == null && searchStack.size > 1) {
+        val newStack = searchStack.dropLast(1)
+        searchStack = newStack
+        scope.launch { appPrefs.setSearchStack(newStack.joinToString("||")) }
+        val prevTag = newStack.last()
         searchInput = if (prevTag == "#HOT#") "" else prevTag
-        page = 1
-        isLastPage = false
-        retryTrigger++
         scope.launch { gridState.scrollToItem(0) }
     }
 
-    if (selectedIndex != null) BackHandler { selectedIndex = null }
+    if (selectedPostIndex != null) BackHandler { selectedPostIndex = null }
 
-    BackHandler(enabled = selectedIndex == null && searchStack.size == 1) {
+    BackHandler(enabled = selectedPostIndex == null && searchStack.size <= 1) {
         Thread { VpnManager.stopVpnSync(context) }.start()
         activity?.finishAffinity()
-    }
-
-    LaunchedEffect(page, currentTag, retryTrigger, vpnState, isVpnBypassed) {
-        if (vpnState == Tunnel.State.UP || isVpnBypassed) {
-            if (page == 1) isLastPage = false
-            isLoading = true
-            errorMessage = null
-            try {
-                var finalTag = if (currentTag == "#HOT#") "date:>=7_days_ago order:score" else currentTag.trim()
-
-                if (!isNsfwEnabled && !finalTag.contains("rating:")) finalTag = if (finalTag.isEmpty()) "rating:safe" else "$finalTag rating:safe"
-                if (blacklistedTags.isNotEmpty()) {
-                    val negatedTags = blacklistedTags.joinToString(" ") { "-$it" }
-                    finalTag = if (finalTag.isEmpty()) negatedTags else "$finalTag $negatedTags"
-                }
-
-                val response = NetworkModule.api!!.getPosts(tags = finalTag, page = page)
-
-                if (response.posts.size < 20) isLastPage = true
-                if (page == 1) posts = response.posts else posts = posts + response.posts
-
-            } catch (e: Exception) {
-                errorMessage = when {
-                    e is retrofit2.HttpException && e.code() == 401 -> {
-                        loginUsername = ""
-                        loginApiKey = ""
-                        encryptedPrefs.edit().remove("username").remove("apiKey").apply()
-                        NetworkModule.username = ""
-                        NetworkModule.apiKey = ""
-                        scope.launch {
-                            val errorToast = Toast.makeText(context, strings.loginFailed, Toast.LENGTH_LONG)
-                            errorToast.show()
-                            delay(2500)
-                            errorToast.show()
-                        }
-                        strings.authFailed
-                    }
-                    e is retrofit2.HttpException && e.code() == 403 -> {
-                        showCaptchaDialog = true
-                        strings.error403
-                    }
-                    e is retrofit2.HttpException && e.code() == 422 -> strings.errorTooManyTags
-                    e is retrofit2.HttpException && e.code() == 451 -> strings.error451
-                    else -> strings.networkError(e.localizedMessage ?: "")
-                }
-            } finally { isLoading = false }
-        }
     }
 
     val vpnPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -844,10 +1019,10 @@ fun MainApp(
             if (setupMode == "MULLVAD") {
                 scope.launch {
                     vpnErrorMessage = null
-                    val success = autoConnectMullvad(mullvadAccountInput, context, prefs, encryptedPrefs)
+                    val success = autoConnectMullvad(mullvadAccountInput, context, appPrefs)
                     if (success) {
                         isVpnBypassed = true
-                        prefs.edit().putBoolean("isVpnBypassed", true).apply()
+                        appPrefs.setVpnBypassed(true)
                     } else {
                         vpnErrorMessage = strings.loginFailedMullvad
                     }
@@ -861,7 +1036,7 @@ fun MainApp(
                         } catch (e: Exception) {}
                     }
                     isVpnBypassed = true
-                    prefs.edit().putBoolean("isVpnBypassed", true).apply()
+                    scope.launch { appPrefs.setVpnBypassed(true) }
                 }
             }
         }
@@ -874,7 +1049,7 @@ fun MainApp(
                 if (inputStream != null) {
                     val text = inputStream.bufferedReader(Charsets.UTF_8).use { reader -> reader.readText() }
                     val cleanText = text.replace("\uFEFF", "").trim()
-                    encryptedPrefs.edit().putString("vpnConfigText", cleanText).apply()
+                    scope.launch { appPrefs.setVpnConfig(cleanText) }
                     vpnConfig = Config.parse(cleanText.byteInputStream(Charsets.UTF_8))
                     vpnErrorMessage = null
                     Toast.makeText(context, strings.configSaved, Toast.LENGTH_SHORT).show()
@@ -889,8 +1064,7 @@ fun MainApp(
         Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
                 Image(painter = painterResource(id = R.drawable.ic_launcher_warning), contentDescription = strings.cdLogo, modifier = Modifier.size(140.dp).padding(bottom = 16.dp))
-                Text(strings.hideoutSetup, color = NeonOrange, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-
+                Text(strings.hideoutSetup, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Text(strings.vpnWarning, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 12.dp))
 
                 if (setupMode == null) {
@@ -898,19 +1072,19 @@ fun MainApp(
                         onClick = { setupMode = "MULLVAD" },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 4.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surface)
-                    ) { Text(strings.setupMullvad, color = NeonOrange) }
+                    ) { Text(strings.setupMullvad, color = MaterialTheme.colorScheme.primary) }
 
                     Button(
                         onClick = { setupMode = "WIREGUARD" },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 4.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surface)
-                    ) { Text(strings.setupWireguard, color = NeonOrange) }
+                    ) { Text(strings.setupWireguard, color = MaterialTheme.colorScheme.primary) }
 
                     Spacer(modifier = Modifier.height(16.dp))
                     Button(
                         onClick = {
                             isVpnBypassed = true
-                            prefs.edit().putBoolean("isVpnBypassed", true).apply()
+                            scope.launch { appPrefs.setVpnBypassed(true) }
                         },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = DarkSurface, contentColor = Color.Red)
@@ -920,7 +1094,7 @@ fun MainApp(
 
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Button(onClick = { filePickerLauncher.launch("*/*") }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                            Text(if (vpnConfig == null) strings.selectConfig else strings.changeConfig, color = NeonOrange)
+                            Text(if (vpnConfig == null) strings.selectConfig else strings.changeConfig, color = MaterialTheme.colorScheme.primary)
                         }
                         if (vpnConfig != null) {
                             Button(
@@ -933,11 +1107,11 @@ fun MainApp(
                                             context.startService(Intent(context, VpnCleanupService::class.java))
                                         }
                                         isVpnBypassed = true
-                                        prefs.edit().putBoolean("isVpnBypassed", true).apply()
+                                        scope.launch { appPrefs.setVpnBypassed(true) }
                                     }
                                 },
-                                colors = ButtonDefaults.buttonColors(containerColor = NeonOrange)
-                            ) { Text(strings.enableTunnel, color = DeepBlack, fontWeight = FontWeight.Bold) }
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                            ) { Text(strings.enableTunnel, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold) }
                         }
                     }
                     TextButton(onClick = { setupMode = null }, modifier = Modifier.padding(top = 16.dp)) {
@@ -962,19 +1136,19 @@ fun MainApp(
                             else {
                                 scope.launch {
                                     vpnErrorMessage = null
-                                    val success = autoConnectMullvad(mullvadAccountInput, context, prefs, encryptedPrefs)
+                                    val success = autoConnectMullvad(mullvadAccountInput, context, appPrefs)
                                     if (success) {
                                         isVpnBypassed = true
-                                        prefs.edit().putBoolean("isVpnBypassed", true).apply()
+                                        appPrefs.setVpnBypassed(true)
                                     } else {
                                         vpnErrorMessage = strings.loginFailedMullvad
                                     }
                                 }
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = NeonOrange),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp)
-                    ) { Text(strings.connectLabel, color = DeepBlack, fontWeight = FontWeight.Bold) }
+                    ) { Text(strings.connectLabel, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold) }
 
                     TextButton(onClick = { setupMode = null }, modifier = Modifier.padding(top = 16.dp)) {
                         Text(strings.cdBack, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -983,83 +1157,73 @@ fun MainApp(
             }
         }
     } else {
-        if (selectedIndex != null) {
+        if (selectedPostIndex != null) {
             DetailPagerScreen(
-                posts = posts, initialIndex = selectedIndex!!, prefs = prefs, encryptedPrefs = encryptedPrefs,
-                onClose = { selectedIndex = null }, onLoadMore = { if (!isLastPage) page++ },
+                lazyPagingItems = lazyPagingItems,
+                initialIndex = selectedPostIndex!!,
+                appPrefs = appPrefs,
+                isDarkTheme = isDarkTheme,
+                onClose = { selectedPostIndex = null },
                 onTagClick = { clickedTag ->
-                    selectedIndex = null
+                    selectedPostIndex = null
                     searchInput = clickedTag
-                    if (searchStack.last() != clickedTag) {
-                        searchStack = searchStack + clickedTag
-                        page = 1
-                        isLastPage = false
-                        retryTrigger++
-                        scope.launch { gridState.scrollToItem(0) }
+                    if (searchStack.lastOrNull() != clickedTag) {
+                        val next = searchStack + clickedTag
+                        searchStack = next
+                        scope.launch {
+                            appPrefs.setSearchStack(next.joinToString("||"))
+                            gridState.scrollToItem(0)
+                        }
                     }
-                },
-                onFavoriteToggle = { postId, isFav, newScore ->
-                    posts = posts.map { if (it.id == postId) it.copy(is_favorited = isFav, score = it.score.copy(total = newScore)) else it }
                 }
             )
         } else {
             GalleryScreen(
-                posts = posts, isLoading = isLoading, errorMessage = errorMessage,
-                searchInput = searchInput, currentAppliedTag = currentTag,
+                lazyPagingItems = lazyPagingItems,
+                searchInput = searchInput,
+                currentAppliedTag = currentTag,
                 gridState = gridState,
                 onSearchInputChange = { searchInput = it },
                 onSearch = {
-                    if (searchInput != searchStack.last()) {
-                        searchStack = searchStack + searchInput
-                        page = 1
-                        isLastPage = false
-                        retryTrigger++
-                        scope.launch { gridState.scrollToItem(0) }
+                    if (searchInput != searchStack.lastOrNull()) {
+                        val next = searchStack + searchInput
+                        searchStack = next
+                        scope.launch {
+                            appPrefs.setSearchStack(next.joinToString("||"))
+                            gridState.scrollToItem(0)
+                        }
                     }
                 },
-                onRetry = { retryTrigger++ },
-                onLoadMore = { if (!isLastPage) page++ },
-                isLastPage = isLastPage,
                 isVpnActive = (vpnState == Tunnel.State.UP),
                 onVpnActionClick = {
                     if (vpnState == Tunnel.State.UP) {
                         Thread { VpnManager.stopVpnSync(context) }.start()
                     } else {
                         isVpnBypassed = false
-                        prefs.edit().putBoolean("isVpnBypassed", false).apply()
+                        scope.launch { appPrefs.setVpnBypassed(false) }
                     }
                 },
-                onPostClick = { index -> selectedIndex = index },
-                isDarkTheme = isDarkTheme, onThemeToggle = onThemeToggle,
+                onPostClick = { index -> selectedPostIndex = index },
+                isDarkTheme = isDarkTheme,
+                isDynamicColor = isDynamicColor,
+                onThemeToggle = { scope.launch { appPrefs.setDarkTheme(!isDarkTheme) } },
+                onDynamicColorToggle = { scope.launch { appPrefs.setDynamicColor(!isDynamicColor) } },
                 isNsfwEnabled = isNsfwEnabled,
-                onNsfwToggle = {
-                    isNsfwEnabled = !isNsfwEnabled
-                    prefs.edit().putBoolean("isNsfwEnabled", isNsfwEnabled).apply()
-                    page = 1
-                    isLastPage = false
-                    retryTrigger++
-                    scope.launch { gridState.scrollToItem(0) }
-                },
-                loginUsername = loginUsername, loginApiKey = loginApiKey,
-                onLoginSave = { user, key ->
-                    loginUsername = user
-                    loginApiKey = key
-                    encryptedPrefs.edit().putString("username", user).putString("apiKey", key).apply()
-                    page = 1
-                    isLastPage = false
-                    retryTrigger++
-                    scope.launch { gridState.scrollToItem(0) }
-                },
+                onNsfwToggle = { scope.launch { appPrefs.setNsfwEnabled(!isNsfwEnabled) } },
+                loginUsername = loginUsername,
+                loginApiKey = loginApiKey,
+                onLoginSave = { user, key -> scope.launch { appPrefs.setCredentials(user, key) } },
                 onFavoritesClick = {
                     if (loginUsername.isNotBlank()) {
                         val favTag = "fav:$loginUsername"
                         searchInput = favTag
-                        if (searchStack.last() != favTag) {
-                            searchStack = searchStack + favTag
-                            page = 1
-                            isLastPage = false
-                            retryTrigger++
-                            scope.launch { gridState.scrollToItem(0) }
+                        if (searchStack.lastOrNull() != favTag) {
+                            val next = searchStack + favTag
+                            searchStack = next
+                            scope.launch {
+                                appPrefs.setSearchStack(next.joinToString("||"))
+                                gridState.scrollToItem(0)
+                            }
                         }
                     } else {
                         Toast.makeText(context, strings.loginFirst, Toast.LENGTH_SHORT).show()
@@ -1068,26 +1232,20 @@ fun MainApp(
                 onHotPostsClick = {
                     searchInput = ""
                     val hotTag = "#HOT#"
-                    if (searchStack.last() != hotTag) {
-                        searchStack = searchStack + hotTag
-                        page = 1
-                        isLastPage = false
-                        retryTrigger++
-                        scope.launch { gridState.scrollToItem(0) }
+                    if (searchStack.lastOrNull() != hotTag) {
+                        val next = searchStack + hotTag
+                        searchStack = next
+                        scope.launch {
+                            appPrefs.setSearchStack(next.joinToString("||"))
+                            gridState.scrollToItem(0)
+                        }
                     }
                 },
-                blacklistedTags = blacklistedTags,
-                onBlacklistSave = { newList ->
-                    blacklistedTags = newList
-                    prefs.edit().putStringSet("blacklist", newList.toSet()).apply()
-                    page = 1
-                    isLastPage = false
-                    retryTrigger++
-                    scope.launch { gridState.scrollToItem(0) }
-                },
-                prefs = prefs,
+                blacklistedTags = blacklistedList,
+                onBlacklistSave = { newList -> scope.launch { appPrefs.setBlacklist(newList.toSet()) } },
+                appPrefs = appPrefs,
                 appLanguage = appLanguage,
-                onLanguageChange = onLanguageChange
+                onLanguageChange = { newLang -> scope.launch { appPrefs.setAppLanguage(newLang) } }
             )
         }
     }
@@ -1100,7 +1258,7 @@ fun CloudflareBypassDialog(onSuccess: (String) -> Unit, onCancel: () -> Unit) {
 
     LaunchedEffect(Unit) {
         while (isChecking) {
-            kotlinx.coroutines.delay(500)
+            delay(500)
             val cookies = CookieManager.getInstance().getCookie("https://e621.net") ?: ""
             if (cookies.contains("cf_clearance")) {
                 val cfCookie = cookies.split(";").map { it.trim() }.find { it.startsWith("cf_clearance=") }
@@ -1124,7 +1282,7 @@ fun CloudflareBypassDialog(onSuccess: (String) -> Unit, onCancel: () -> Unit) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(strings.cloudflareCaptcha, style = MaterialTheme.typography.titleMedium, color = NeonOrange)
+                    Text(strings.cloudflareCaptcha, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
                     IconButton(onClick = onCancel) { Icon(Icons.Default.Close, contentDescription = strings.cdClose, tint = TextWhite) }
                 }
                 AndroidView(
@@ -1150,7 +1308,10 @@ fun CloudflareBypassDialog(onSuccess: (String) -> Unit, onCancel: () -> Unit) {
                                         }
                                     } else {
                                         view.evaluateJavascript("document.title") { title ->
-                                            if (title != null && title.contains("e621", ignoreCase = true) && !title.contains("Just a moment", ignoreCase = true) && !title.contains("Attention", ignoreCase = true)) {
+                                            if (title != null && title.contains("e621", ignoreCase = true) &&
+                                                !title.contains("Just a moment", ignoreCase = true) &&
+                                                !title.contains("Attention", ignoreCase = true)
+                                            ) {
                                                 isChecking = false
                                                 onSuccess("bypass")
                                             }
@@ -1170,18 +1331,18 @@ fun CloudflareBypassDialog(onSuccess: (String) -> Unit, onCancel: () -> Unit) {
 @kotlin.OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GalleryScreen(
-    posts: List<Post>, isLoading: Boolean, errorMessage: String?,
+    lazyPagingItems: LazyPagingItems<Post>,
     searchInput: String, currentAppliedTag: String,
     gridState: LazyStaggeredGridState,
     onSearchInputChange: (String) -> Unit, onSearch: () -> Unit,
-    onRetry: () -> Unit, onLoadMore: () -> Unit, isLastPage: Boolean,
     isVpnActive: Boolean, onVpnActionClick: () -> Unit, onPostClick: (Int) -> Unit,
-    isDarkTheme: Boolean, onThemeToggle: () -> Unit,
+    isDarkTheme: Boolean, isDynamicColor: Boolean,
+    onThemeToggle: () -> Unit, onDynamicColorToggle: () -> Unit,
     isNsfwEnabled: Boolean, onNsfwToggle: () -> Unit,
     loginUsername: String, loginApiKey: String, onLoginSave: (String, String) -> Unit,
     onFavoritesClick: () -> Unit, onHotPostsClick: () -> Unit,
     blacklistedTags: List<String>, onBlacklistSave: (List<String>) -> Unit,
-    prefs: android.content.SharedPreferences,
+    appPrefs: AppPreferences,
     appLanguage: String, onLanguageChange: (String) -> Unit
 ) {
     val focusManager = LocalFocusManager.current
@@ -1205,10 +1366,42 @@ fun GalleryScreen(
     var showBlacklistDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
 
+    val savedTreeUri by appPrefs.downloadTreeUri.collectAsState(initial = "")
+
     LaunchedEffect(Unit) {
         delay(100)
         focusManager.clearFocus(force = true)
         keyboardController?.hide()
+    }
+
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        uri?.let {
+            scope.launch {
+                val jsonStr = appPrefs.exportSettingsBase64()
+                context.contentResolver.openOutputStream(it)?.use { out ->
+                    out.write(jsonStr.toByteArray(Charsets.UTF_8))
+                }
+                Toast.makeText(context, strings.exportSuccess, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let {
+            scope.launch {
+                try {
+                    val text = context.contentResolver.openInputStream(it)?.bufferedReader()?.use { reader -> reader.readText() } ?: ""
+                    val success = appPrefs.importSettingsBase64(text)
+                    if (success) {
+                        Toast.makeText(context, strings.importSuccess, Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, strings.importFailed, Toast.LENGTH_SHORT).show()
+                    }
+                } catch(e: Exception) {
+                    Toast.makeText(context, strings.importFailed, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     if (showLoginDialog) {
@@ -1216,7 +1409,7 @@ fun GalleryScreen(
         var tempKey by remember { mutableStateOf(loginApiKey) }
         AlertDialog(
             onDismissRequest = { showLoginDialog = false },
-            title = { Text(strings.accountLogin, color = NeonOrange) },
+            title = { Text(strings.accountLogin, color = MaterialTheme.colorScheme.primary) },
             text = {
                 Column {
                     Text(strings.apiKeyInfo, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1226,7 +1419,7 @@ fun GalleryScreen(
                     OutlinedTextField(value = tempKey, onValueChange = { tempKey = it }, label = { Text(strings.apiKeyHint) }, singleLine = true, visualTransformation = PasswordVisualTransformation())
                 }
             },
-            confirmButton = { TextButton(onClick = { onLoginSave(tempUser, tempKey); showLoginDialog = false }) { Text(strings.save, color = NeonOrange) } },
+            confirmButton = { TextButton(onClick = { onLoginSave(tempUser, tempKey); showLoginDialog = false }) { Text(strings.save, color = MaterialTheme.colorScheme.primary) } },
             dismissButton = {
                 Row {
                     if (loginUsername.isNotBlank()) TextButton(onClick = { onLoginSave("", ""); showLoginDialog = false }) { Text(strings.logout, color = Color.Red) }
@@ -1242,7 +1435,7 @@ fun GalleryScreen(
         var currentList by remember { mutableStateOf(blacklistedTags) }
         AlertDialog(
             onDismissRequest = { showBlacklistDialog = false },
-            title = { Text(strings.blacklistManagement, color = NeonOrange) },
+            title = { Text(strings.blacklistManagement, color = MaterialTheme.colorScheme.primary) },
             text = {
                 Column {
                     Text(strings.blacklistInfo, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1251,7 +1444,7 @@ fun GalleryScreen(
                         OutlinedTextField(value = newTag, onValueChange = { newTag = it }, modifier = Modifier.weight(1f), label = { Text(strings.tagInputHint) }, singleLine = true)
                         IconButton(onClick = {
                             if (newTag.isNotBlank() && !currentList.contains(newTag.trim())) { currentList = currentList + newTag.trim(); newTag = "" }
-                        }) { Icon(Icons.Default.Add, contentDescription = strings.cdAdd, tint = NeonOrange) }
+                        }) { Icon(Icons.Default.Add, contentDescription = strings.cdAdd, tint = MaterialTheme.colorScheme.primary) }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
@@ -1264,7 +1457,7 @@ fun GalleryScreen(
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { onBlacklistSave(currentList); showBlacklistDialog = false }) { Text(strings.save, color = NeonOrange) } },
+            confirmButton = { TextButton(onClick = { onBlacklistSave(currentList); showBlacklistDialog = false }) { Text(strings.save, color = MaterialTheme.colorScheme.primary) } },
             dismissButton = { TextButton(onClick = { showBlacklistDialog = false }) { Text(strings.cancel, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
             containerColor = MaterialTheme.colorScheme.surface
         )
@@ -1274,28 +1467,33 @@ fun GalleryScreen(
         val dirPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
             uri?.let {
                 context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                prefs.edit().putString("downloadTreeUri", it.toString()).apply()
+                scope.launch { appPrefs.setDownloadTreeUri(it.toString()) }
                 Toast.makeText(context, strings.settingsSaved, Toast.LENGTH_SHORT).show()
             }
         }
-        val savedTreeUri = prefs.getString("downloadTreeUri", "") ?: ""
         var currentCacheSize by remember(showSettingsDialog) { mutableStateOf(getCacheSizeString(context)) }
 
         AlertDialog(
             onDismissRequest = { showSettingsDialog = false },
-            title = { Text(strings.appSettings, color = NeonOrange) },
+            title = { Text(strings.appSettings, color = MaterialTheme.colorScheme.primary) },
             text = {
-                Column {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onThemeToggle() }.padding(vertical = 8.dp)) {
                         Text(strings.useDarkTheme, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
-                        Switch(checked = isDarkTheme, onCheckedChange = { onThemeToggle() }, colors = SwitchDefaults.colors(checkedThumbColor = NeonOrange, checkedTrackColor = NeonOrange.copy(alpha = 0.5f)))
+                        Switch(checked = isDarkTheme, onCheckedChange = { onThemeToggle() }, colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary, checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)))
+                    }
+                    if (SDK_INT >= VERSION_CODES.S) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onDynamicColorToggle() }.padding(vertical = 8.dp)) {
+                            Text(strings.useDynamicColor, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
+                            Switch(checked = isDynamicColor, onCheckedChange = { onDynamicColorToggle() }, colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary, checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)))
+                        }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                         Text(strings.appLanguageLabel, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(strings.languageKo, fontWeight = if (appLanguage == "ko") FontWeight.Bold else FontWeight.Normal, color = if (appLanguage == "ko") NeonOrange else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable { onLanguageChange("ko") }.padding(8.dp))
+                            Text(strings.languageKo, fontWeight = if (appLanguage == "ko") FontWeight.Bold else FontWeight.Normal, color = if (appLanguage == "ko") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable { onLanguageChange("ko") }.padding(8.dp))
                             Text("|", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(strings.languageEn, fontWeight = if (appLanguage == "en") FontWeight.Bold else FontWeight.Normal, color = if (appLanguage == "en") NeonOrange else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable { onLanguageChange("en") }.padding(8.dp))
+                            Text(strings.languageEn, fontWeight = if (appLanguage == "en") FontWeight.Bold else FontWeight.Normal, color = if (appLanguage == "en") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable { onLanguageChange("en") }.padding(8.dp))
                         }
                     }
                     Spacer(Modifier.height(16.dp))
@@ -1322,13 +1520,23 @@ fun GalleryScreen(
                     Spacer(Modifier.height(24.dp))
                     HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                     Spacer(Modifier.height(8.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        OutlinedButton(onClick = { exportLauncher.launch("hideout_settings_backup.json") }, modifier = Modifier.weight(1f).padding(end = 4.dp)) {
+                            Text(strings.exportSettings, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+                        }
+                        OutlinedButton(onClick = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, modifier = Modifier.weight(1f).padding(start = 4.dp)) {
+                            Text(strings.importSettings, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+                        }
+                    }
+
+                    Spacer(Modifier.height(16.dp))
                     OutlinedButton(
                         onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Canned-F0xy/HIDEOUT-e621_Android_Client"))
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Canned-F0xy"))
                             context.startActivity(intent)
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonOrange)
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
                     ) {
                         Icon(Icons.Default.OpenInNew, contentDescription = strings.cdOpenBrowser, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
@@ -1337,7 +1545,7 @@ fun GalleryScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showSettingsDialog = false }) { Text(strings.close, color = NeonOrange) }
+                TextButton(onClick = { showSettingsDialog = false }) { Text(strings.close, color = MaterialTheme.colorScheme.primary) }
             },
             containerColor = MaterialTheme.colorScheme.surface
         )
@@ -1353,8 +1561,8 @@ fun GalleryScreen(
                 Column(modifier = Modifier.fillMaxWidth().padding(24.dp)) {
                     Image(painter = painterResource(id = R.drawable.ic_launcher2), contentDescription = strings.cdLogo, modifier = Modifier.size(64.dp).clip(RoundedCornerShape(12.dp)))
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text("HIDEOUT", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black, letterSpacing = 2.sp), color = NeonOrange)
-                    Text("Ver. 2026-07-29 A1", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("HIDEOUT", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black, letterSpacing = 2.sp), color = MaterialTheme.colorScheme.primary)
+                    Text("Ver. 2026-08-19", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                 Spacer(modifier = Modifier.height(8.dp))
@@ -1363,35 +1571,35 @@ fun GalleryScreen(
                     label = { Text(if (loginUsername.isNotBlank()) strings.changeLoginInfo(loginUsername) else strings.accountLoginMenu) },
                     selected = false,
                     onClick = { scope.launch { drawerState.close() }; showLoginDialog = true },
-                    icon = { Icon(Icons.Default.Person, null, tint = NeonOrange) },
+                    icon = { Icon(Icons.Default.Person, null, tint = MaterialTheme.colorScheme.primary) },
                     modifier = Modifier.padding(horizontal = 12.dp)
                 )
                 NavigationDrawerItem(
                     label = { Text(strings.viewFavorites) },
                     selected = false,
                     onClick = { scope.launch { drawerState.close() }; onFavoritesClick() },
-                    icon = { Icon(Icons.Default.Star, null, tint = NeonOrange) },
+                    icon = { Icon(Icons.Default.Star, null, tint = MaterialTheme.colorScheme.primary) },
                     modifier = Modifier.padding(horizontal = 12.dp)
                 )
                 NavigationDrawerItem(
                     label = { Text(strings.weeklyHot) },
                     selected = false,
                     onClick = { scope.launch { drawerState.close() }; onHotPostsClick() },
-                    icon = { Icon(Icons.Default.TrendingUp, null, tint = NeonOrange) },
+                    icon = { Icon(Icons.Default.TrendingUp, null, tint = MaterialTheme.colorScheme.primary) },
                     modifier = Modifier.padding(horizontal = 12.dp)
                 )
                 NavigationDrawerItem(
                     label = { Text(strings.manageBlacklist) },
                     selected = false,
                     onClick = { scope.launch { drawerState.close() }; showBlacklistDialog = true },
-                    icon = { Icon(Icons.Default.Block, null, tint = NeonOrange) },
+                    icon = { Icon(Icons.Default.Block, null, tint = MaterialTheme.colorScheme.primary) },
                     modifier = Modifier.padding(horizontal = 12.dp)
                 )
                 NavigationDrawerItem(
-                    label = { Text(if (isNsfwEnabled) strings.r18ModeOn else strings.r18ModeOff, color = if(isNsfwEnabled) Color.Red else MaterialTheme.colorScheme.onSurface) },
+                    label = { Text(if (isNsfwEnabled) strings.r18ModeOn else strings.r18ModeOff, color = if (isNsfwEnabled) Color.Red else MaterialTheme.colorScheme.onSurface) },
                     selected = false,
                     onClick = { scope.launch { drawerState.close() }; onNsfwToggle() },
-                    icon = { Icon(Icons.Default.Warning, null, tint = if(isNsfwEnabled) Color.Red else NeonOrange) },
+                    icon = { Icon(Icons.Default.Warning, null, tint = if (isNsfwEnabled) Color.Red else MaterialTheme.colorScheme.primary) },
                     modifier = Modifier.padding(horizontal = 12.dp)
                 )
                 Spacer(modifier = Modifier.weight(1f))
@@ -1409,10 +1617,10 @@ fun GalleryScreen(
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("HIDEOUT", color = NeonOrange, fontWeight = FontWeight.Black) },
+                    title = { Text("HIDEOUT", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black) },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.Default.Menu, strings.cdOpenMenu, tint = NeonOrange)
+                            Icon(Icons.Default.Menu, strings.cdOpenMenu, tint = MaterialTheme.colorScheme.primary)
                         }
                     },
                     actions = {
@@ -1442,7 +1650,7 @@ fun GalleryScreen(
                         try {
                             tagSuggestions = NetworkModule.api!!.getAutocomplete(lastWord)
                             expanded = tagSuggestions.isNotEmpty()
-                        } catch(e: Exception) { expanded = false }
+                        } catch (e: Exception) { expanded = false }
                     } else { expanded = false }
                 }
 
@@ -1451,7 +1659,7 @@ fun GalleryScreen(
                         value = searchInput, onValueChange = onSearchInputChange,
                         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(50)).onFocusChanged { focusState -> isSearchFocused = focusState.isFocused },
                         placeholder = { Text(strings.searchTags, color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = strings.cdSearch, tint = NeonOrange) },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = strings.cdSearch, tint = MaterialTheme.colorScheme.primary) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = { expanded = false; onSearch(); focusManager.clearFocus(force = true); keyboardController?.hide() }),
@@ -1490,6 +1698,7 @@ fun GalleryScreen(
                 Text(text = titleText, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp))
 
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+
                     LazyVerticalStaggeredGrid(
                         columns = StaggeredGridCells.Fixed(gridColumns),
                         state = gridState,
@@ -1498,27 +1707,33 @@ fun GalleryScreen(
                         verticalItemSpacing = 12.dp,
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        itemsIndexed(posts, key = { _, post -> post.id }) { index, post ->
-                            if (index >= posts.size - 1 && !isLoading && errorMessage == null && !isLastPage) LaunchedEffect(Unit) { onLoadMore() }
-                            val cachedFile = getCachedFile(context, post.file.md5, post.file.ext)
-                            val imageModel = cachedFile ?: post.preview.url
-
-                            imageModel?.let { imageUrl ->
-                                val imageRequest = remember(imageUrl) {
-                                    ImageRequest.Builder(context).data(imageUrl).crossfade(200).build()
-                                }
+                        items(count = lazyPagingItems.itemCount) { index ->
+                            val post = lazyPagingItems[index]
+                            if (post != null) {
+                                val ext = post.file?.ext ?: ""
+                                val md5 = post.file?.md5 ?: ""
+                                val cachedFile = getCachedFile(context, md5, ext)
+                                val imageModel = cachedFile ?: post.preview?.url
 
                                 Card(
                                     modifier = Modifier.fillMaxWidth().clickable { focusManager.clearFocus(force = true); keyboardController?.hide(); onPostClick(index) },
                                     shape = RoundedCornerShape(12.dp), elevation = CardDefaults.cardElevation(0.dp),
                                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                                 ) {
-                                    Box(modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp)) {
-                                        AsyncImage(model = imageRequest, contentDescription = "${strings.idLabel(post.id)}", modifier = Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
-                                        Box(modifier = Modifier.align(Alignment.BottomStart).padding(6.dp).background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                                            Text(post.file.ext.uppercase(), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    Box(modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp), contentAlignment = Alignment.Center) {
+                                        if (imageModel != null) {
+                                            AsyncImage(model = imageRequest(context, imageModel), contentDescription = "${strings.idLabel(post.id)}", modifier = Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
+                                        } else {
+                                            Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
-                                        if ((post.file.ext == "webm" || post.file.ext == "mp4") && post.duration != null && post.duration > 0) {
+
+                                        if (ext.isNotBlank()) {
+                                            Box(modifier = Modifier.align(Alignment.BottomStart).padding(6.dp).background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                                                Text(ext.uppercase(), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+
+                                        if ((ext == "webm" || ext == "mp4") && post.duration != null && post.duration > 0) {
                                             Box(modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp).background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
                                                 Text(formatDuration(post.duration), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                             }
@@ -1529,26 +1744,36 @@ fun GalleryScreen(
                         }
                     }
 
-                    if (isLoading && posts.isEmpty()) {
-                        Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(color = NeonOrange, modifier = Modifier.size(48.dp))
-                        }
-                    } else if (errorMessage != null && posts.isEmpty()) {
-                        Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(16.dp)) {
-                                Icon(Icons.Default.Warning, contentDescription = strings.cdError, tint = Color.Red, modifier = Modifier.size(48.dp))
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Text(strings.loadFailed, color = NeonOrange, style = MaterialTheme.typography.titleMedium)
-                                Text(errorMessage!!, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 12.dp))
-                                Button(onClick = onRetry, colors = ButtonDefaults.buttonColors(containerColor = NeonOrange)) { Text(strings.retry, color = DeepBlack, fontWeight = FontWeight.Bold) }
+                    when (val state = lazyPagingItems.loadState.refresh) {
+                        is LoadState.Loading -> {
+                            if (lazyPagingItems.itemCount == 0) {
+                                Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(48.dp))
+                                }
                             }
                         }
-                    } else if (posts.isEmpty() && !isLoading) {
-                        Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(16.dp)) {
-                                Icon(Icons.Default.Warning, contentDescription = strings.cdNoResults, tint = NeonOrange, modifier = Modifier.size(64.dp))
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Text(strings.noResults, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        is LoadState.Error -> {
+                            if (lazyPagingItems.itemCount == 0) {
+                                Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(16.dp)) {
+                                        Icon(Icons.Default.Warning, contentDescription = strings.cdError, tint = Color.Red, modifier = Modifier.size(48.dp))
+                                        Spacer(modifier = Modifier.height(16.dp))
+                                        Text(strings.loadFailed, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
+                                        Text(state.error.localizedMessage ?: "Unknown Error", color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 12.dp))
+                                        Button(onClick = { lazyPagingItems.retry() }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) { Text(strings.retry, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold) }
+                                    }
+                                }
+                            }
+                        }
+                        is LoadState.NotLoading -> {
+                            if (lazyPagingItems.itemCount == 0 && state.endOfPaginationReached) {
+                                Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(16.dp)) {
+                                        Icon(Icons.Default.Warning, contentDescription = strings.cdNoResults, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(64.dp))
+                                        Spacer(modifier = Modifier.height(16.dp))
+                                        Text(strings.noResults, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                    }
+                                }
                             }
                         }
                     }
@@ -1558,60 +1783,154 @@ fun GalleryScreen(
     }
 }
 
+@Composable
+fun imageRequest(context: Context, imageUrl: Any): ImageRequest {
+    return remember(imageUrl) {
+        ImageRequest.Builder(context).data(imageUrl).crossfade(200).build()
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun DetailPagerScreen(posts: List<Post>, initialIndex: Int, prefs: android.content.SharedPreferences, encryptedPrefs: android.content.SharedPreferences, onClose: () -> Unit, onLoadMore: () -> Unit, onTagClick: (String) -> Unit, onFavoriteToggle: (Int, Boolean, Int) -> Unit) {
-    val pagerState = rememberPagerState(initialPage = initialIndex, pageCount = { posts.size })
-    LaunchedEffect(pagerState.currentPage) { if (pagerState.currentPage >= posts.size - 3) onLoadMore() }
+fun DetailPagerScreen(
+    lazyPagingItems: LazyPagingItems<Post>,
+    initialIndex: Int,
+    appPrefs: AppPreferences,
+    isDarkTheme: Boolean,
+    onClose: () -> Unit,
+    onTagClick: (String) -> Unit
+) {
+    val pagerState = rememberPagerState(initialPage = initialIndex, pageCount = { lazyPagingItems.itemCount })
+
     HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { pageIndex ->
         val isActive = pagerState.currentPage == pageIndex
-        DetailScreen(post = posts[pageIndex], isActivePage = isActive, prefs = prefs, encryptedPrefs = encryptedPrefs, onClose = onClose, onTagClick = onTagClick, onFavoriteToggle = onFavoriteToggle)
+        val currentPost = if (pageIndex < lazyPagingItems.itemCount) lazyPagingItems[pageIndex] else null
+
+        if (currentPost != null) {
+            DetailScreen(
+                post = currentPost,
+                isActivePage = isActive,
+                appPrefs = appPrefs,
+                isDarkTheme = isDarkTheme,
+                onClose = onClose,
+                onTagClick = onTagClick
+            )
+        } else {
+            Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+            }
+        }
     }
 }
 
 @kotlin.OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DetailScreen(post: Post, isActivePage: Boolean, prefs: android.content.SharedPreferences, encryptedPrefs: android.content.SharedPreferences, onClose: () -> Unit, onTagClick: (String) -> Unit, onFavoriteToggle: (Int, Boolean, Int) -> Unit) {
+fun DetailScreen(
+    post: Post,
+    isActivePage: Boolean,
+    appPrefs: AppPreferences,
+    isDarkTheme: Boolean,
+    onClose: () -> Unit,
+    onTagClick: (String) -> Unit
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val strings = LocalStrings.current
     var isFullScreen by remember { mutableStateOf(false) }
-    var isFavorited by remember(post.id, post.is_favorited) { mutableStateOf(post.is_favorited) }
-    var currentScore by remember(post.id, post.score.total) { mutableIntStateOf(post.score.total) }
+    var isFavorited by remember(post.id, post.is_favorited) { mutableStateOf(post.is_favorited ?: false) }
+    var currentScore by remember(post.id, post.score?.total) { mutableIntStateOf(post.score?.total ?: 0) }
 
-    val cachedFile = getCachedFile(context, post.file.md5, post.file.ext)
+    val savedTreeUri by appPrefs.downloadTreeUri.collectAsState(initial = "")
+    val cfClearanceCookie by appPrefs.cfClearance.collectAsState(initial = "")
 
-    val gifEnabledLoader = remember { ImageLoader.Builder(context).okHttpClient(NetworkModule.client).components { if (SDK_INT >= 28) add(ImageDecoderDecoder.Factory()) else add(GifDecoder.Factory()) }.build() }
+    val ext = post.file?.ext ?: ""
+    val md5 = post.file?.md5 ?: ""
+    val cachedFile = getCachedFile(context, md5, ext)
 
-    val exoPlayer = remember(post.id) {
-        if ((post.file.ext == "webm" || post.file.ext == "mp4") && post.file.url != null) {
-            ExoPlayer.Builder(context).build().apply {
-                val mediaUri = if (cachedFile != null) Uri.fromFile(cachedFile) else Uri.parse(post.file.url)
-                setMediaItem(MediaItem.fromUri(mediaUri))
-                prepare()
-                playWhenReady = false
-                repeatMode = Player.REPEAT_MODE_ALL
+    val gifEnabledLoader = remember {
+        ImageLoader.Builder(context)
+            .okHttpClient(NetworkModule.client)
+            .components {
+                if (SDK_INT >= 28) add(ImageDecoderDecoder.Factory()) else add(GifDecoder.Factory())
             }
-        } else null
+            .build()
     }
 
+    var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
+
     LaunchedEffect(isActivePage) {
-        if (!isActivePage) {
-            exoPlayer?.pause()
-            isFullScreen = false
+        if (isActivePage && (ext == "webm" || ext == "mp4")) {
+            val mediaUrl = post.file?.url
+            if (mediaUrl != null) {
+                val player = ExoPlayer.Builder(context).build().apply {
+                    val mediaUri = if (cachedFile != null) Uri.fromFile(cachedFile) else Uri.parse(mediaUrl)
+                    setMediaItem(MediaItem.fromUri(mediaUri))
+                    prepare()
+                    playWhenReady = true
+                    repeatMode = Player.REPEAT_MODE_ALL
+                }
+                exoPlayer = player
+            }
+        } else {
+            exoPlayer?.release()
+            exoPlayer = null
         }
     }
 
-    DisposableEffect(exoPlayer) {
-        onDispose { exoPlayer?.release() }
+    DisposableEffect(post.id) {
+        onDispose {
+            exoPlayer?.release()
+            exoPlayer = null
+        }
     }
 
-    if (isFullScreen && post.file.url != null) {
+    val scrollState = rememberScrollState()
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    val animatedOffsetY = remember { Animatable(0f) }
+    var canPullDown by remember { mutableStateOf(false) }
+
+    val nestedScrollConnection = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (dragOffsetY > 0f && available.y < 0f) {
+                    dragOffsetY += available.y
+                    if (dragOffsetY < 0f) dragOffsetY = 0f
+                    scope.launch { animatedOffsetY.snapTo(dragOffsetY) }
+                    return Offset(0f, available.y)
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.Drag && available.y > 0f) {
+                    if (canPullDown && scrollState.value == 0) {
+                        dragOffsetY += available.y * 0.4f
+                        scope.launch { animatedOffsetY.snapTo(dragOffsetY) }
+                        return Offset(0f, available.y)
+                    }
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (dragOffsetY > 150f) {
+                    onClose()
+                    return Velocity.Zero
+                } else if (dragOffsetY > 0f) {
+                    scope.launch { animatedOffsetY.animateTo(0f, tween(200)) }
+                    dragOffsetY = 0f
+                }
+                return Velocity.Zero
+            }
+        }
+    }
+
+    if (isFullScreen && post.file?.url != null) {
         Dialog(onDismissRequest = { isFullScreen = false }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-            if (post.file.ext == "webm" || post.file.ext == "mp4") {
+            if (ext == "webm" || ext == "mp4") {
                 Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
                     if (exoPlayer != null) {
-                        VideoPlayer(exoPlayer = exoPlayer)
+                        VideoPlayer(exoPlayer = exoPlayer!!)
                     }
                     IconButton(onClick = { isFullScreen = false }, modifier = Modifier.align(Alignment.TopEnd).systemBarsPadding().padding(16.dp)) {
                         Icon(Icons.Default.Close, contentDescription = strings.cdClose, tint = Color.White)
@@ -1628,9 +1947,25 @@ fun DetailScreen(post: Post, isActivePage: Boolean, prefs: android.content.Share
     }
 
     Scaffold(
+        modifier = Modifier
+            .offset(y = animatedOffsetY.value.dp)
+            .graphicsLayer {
+                alpha = (1f - (kotlin.math.abs(animatedOffsetY.value) / 400f)).coerceIn(0.4f, 1f)
+            }
+            .nestedScroll(nestedScrollConnection)
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        if (event.changes.any { it.pressed }) {
+                            canPullDown = (scrollState.value == 0)
+                        }
+                    }
+                }
+            },
         topBar = {
             TopAppBar(
-                title = { Text(strings.idLabel(post.id), style = MaterialTheme.typography.titleMedium, color = NeonOrange) },
+                title = { Text(strings.idLabel(post.id), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary) },
                 navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.Default.ArrowBack, contentDescription = strings.cdBack, tint = MaterialTheme.colorScheme.onBackground) } },
                 actions = {
                     IconButton(onClick = {
@@ -1641,7 +1976,6 @@ fun DetailScreen(post: Post, isActivePage: Boolean, prefs: android.content.Share
                                     if (response.isSuccessful || response.code() == 404) {
                                         isFavorited = false
                                         currentScore -= 1
-                                        onFavoriteToggle(post.id, false, currentScore)
                                         Toast.makeText(context, strings.favRemoved, Toast.LENGTH_SHORT).show()
                                     } else { Toast.makeText(context, strings.favRemoveFailed(response.code()), Toast.LENGTH_SHORT).show() }
                                 } else {
@@ -1649,18 +1983,29 @@ fun DetailScreen(post: Post, isActivePage: Boolean, prefs: android.content.Share
                                     if (response.isSuccessful || response.code() == 422) {
                                         isFavorited = true
                                         currentScore += 1
-                                        onFavoriteToggle(post.id, true, currentScore)
                                         Toast.makeText(context, strings.favAdded, Toast.LENGTH_SHORT).show()
-                                    } else if (response.code() == 401 || response.code() == 403) { Toast.makeText(context, strings.favAddFailedLogin, Toast.LENGTH_SHORT).show() } else { Toast.makeText(context, strings.favAddFailed(response.code()), Toast.LENGTH_SHORT).show() }
+                                    } else if (response.code() == 401 || response.code() == 403) {
+                                        Toast.makeText(context, strings.favAddFailedLogin, Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, strings.favAddFailed(response.code()), Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             } catch (e: Exception) { Toast.makeText(context, strings.networkErrorOccurred, Toast.LENGTH_SHORT).show() }
                         }
-                    }) { Icon(imageVector = if (isFavorited) Icons.Default.Favorite else Icons.Default.FavoriteBorder, contentDescription = strings.cdFavoriteToggle, tint = NeonOrange) }
-                    if (post.file.url != null) {
+                    }) { Icon(imageVector = if (isFavorited) Icons.Default.Favorite else Icons.Default.FavoriteBorder, contentDescription = strings.cdFavoriteToggle, tint = MaterialTheme.colorScheme.primary) }
+                    if (post.file?.url != null) {
                         IconButton(onClick = {
-                            val treeUriStr = prefs.getString("downloadTreeUri", "") ?: ""
-                            downloadMediaWithRange(context, post.file.url, "Hideout_${post.id}.${post.file.ext}", post.file.md5, post.file.ext, treeUriStr, encryptedPrefs, strings)
-                        }) { Icon(Icons.Default.Download, contentDescription = strings.cdDownload, tint = NeonOrange) }
+                            downloadMediaWithRange(
+                                context = context,
+                                url = post.file.url,
+                                fileName = "Hideout_${post.id}.$ext",
+                                md5 = md5,
+                                ext = ext,
+                                treeUriStr = savedTreeUri,
+                                cfClearanceCookie = cfClearanceCookie,
+                                strings = strings
+                            )
+                        }) { Icon(Icons.Default.Download, contentDescription = strings.cdDownload, tint = MaterialTheme.colorScheme.primary) }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
@@ -1668,22 +2013,23 @@ fun DetailScreen(post: Post, isActivePage: Boolean, prefs: android.content.Share
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
-        Column(modifier = Modifier.fillMaxSize().padding(innerPadding).verticalScroll(rememberScrollState())) {
+        Column(modifier = Modifier.fillMaxSize().padding(innerPadding).verticalScroll(scrollState)) {
             Box(modifier = Modifier.fillMaxWidth().heightIn(min = 300.dp, max = 600.dp).background(Color.Black), contentAlignment = Alignment.Center) {
-                if (post.file.ext == "webm" || post.file.ext == "mp4") {
-                    if (post.file.url != null) {
+                if (ext == "webm" || ext == "mp4") {
+                    if (post.file?.url != null) {
                         Box(modifier = Modifier.fillMaxSize()) {
                             if (!isFullScreen && exoPlayer != null) {
-                                VideoPlayer(exoPlayer = exoPlayer)
+                                VideoPlayer(exoPlayer = exoPlayer!!)
                             }
                             IconButton(onClick = { isFullScreen = true }, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
                                 Icon(Icons.Default.Fullscreen, contentDescription = strings.cdFullscreen, tint = Color.White, modifier = Modifier.size(32.dp))
                             }
                         }
                     }
-                } else if (post.file.url != null) {
-                    val detailImageRequest = remember(cachedFile, post.file.url) {
-                        ImageRequest.Builder(context).data(cachedFile ?: post.file.url).crossfade(200).build()
+                } else if (post.file?.url != null) {
+                    val displayUrl = post.sample?.url ?: post.file.url
+                    val detailImageRequest = remember(cachedFile, displayUrl) {
+                        ImageRequest.Builder(context).data(cachedFile ?: displayUrl).crossfade(200).build()
                     }
                     AsyncImage(
                         model = detailImageRequest,
@@ -1697,32 +2043,42 @@ fun DetailScreen(post: Post, isActivePage: Boolean, prefs: android.content.Share
 
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text(strings.fileLabel(post.file.ext.uppercase()), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(strings.scoreLabel(currentScore), style = MaterialTheme.typography.titleMedium, color = NeonOrange)
+                    Text(strings.fileLabel(ext.uppercase()), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(strings.scoreLabel(currentScore), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
                 }
                 Spacer(modifier = Modifier.height(16.dp))
+
+                post.pools?.forEach { poolId ->
+                    Button(
+                        onClick = { onTagClick("pool:$poolId") },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    ) { Text(strings.viewPool(poolId), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) }
+                }
 
                 post.getAllRelatedIdsQuery()?.let { query ->
                     Button(
                         onClick = { onTagClick(query) },
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
-                    ) { Text(strings.viewAllRelated, color = NeonOrange) }
+                    ) { Text(strings.viewAllRelated, color = MaterialTheme.colorScheme.primary) }
                     Spacer(modifier = Modifier.height(8.dp))
                 }
 
                 if (!post.description.isNullOrBlank()) {
-                    Text(strings.descLabel, style = MaterialTheme.typography.titleSmall, color = NeonOrange)
+                    Text(strings.descLabel, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                     Text(post.description, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(vertical = 4.dp))
                     Spacer(modifier = Modifier.height(16.dp))
                 }
-                TagSection(title = strings.artistLabel, tags = post.tags.artist, color = Color(0xFFFF5252), onTagClick = onTagClick)
-                TagSection(title = strings.copyrightLabel, tags = post.tags.copyright, color = Color(0xFFE040FB), onTagClick = onTagClick)
-                TagSection(title = strings.characterLabel, tags = post.tags.character, color = Color(0xFF69F0AE), onTagClick = onTagClick)
-                TagSection(title = strings.generalLabel, tags = post.tags.general, color = Color(0xFF40C4FF), onTagClick = onTagClick)
 
-                if (post.sources.isNotEmpty()) {
-                    Text(strings.sourcesLabel, style = MaterialTheme.typography.titleSmall, color = Color.White)
+                TagSection(title = strings.artistLabel, tags = post.tags?.artist ?: emptyList(), color = Color(0xFFFF5252), onTagClick = onTagClick)
+                TagSection(title = strings.copyrightLabel, tags = post.tags?.copyright ?: emptyList(), color = Color(0xFFE040FB), onTagClick = onTagClick)
+                TagSection(title = strings.characterLabel, tags = post.tags?.character ?: emptyList(), color = Color(0xFF69F0AE), onTagClick = onTagClick)
+                TagSection(title = strings.generalLabel, tags = post.tags?.general ?: emptyList(), color = Color(0xFF40C4FF), onTagClick = onTagClick)
+
+                if (!post.sources.isNullOrEmpty()) {
+                    val sourcesTextColor = if (isDarkTheme) Color.White else Color.Black
+                    Text(strings.sourcesLabel, style = MaterialTheme.typography.titleSmall, color = sourcesTextColor)
                     FlowRow(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         post.sources.forEach { sourceUrl ->
                             Box(modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFF40C4FF).copy(alpha = 0.15f)).clickable {
@@ -1738,6 +2094,86 @@ fun DetailScreen(post: Post, isActivePage: Boolean, prefs: android.content.Share
                         }
                     }
                     Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                CommentsSection(postId = post.id)
+            }
+        }
+    }
+}
+
+@Composable
+fun CommentsSection(postId: Int) {
+    val context = LocalContext.current
+    val strings = LocalStrings.current
+    var comments by remember(postId) { mutableStateOf<List<Comment>?>(null) }
+    var isExpanded by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .clickable {
+                    isExpanded = !isExpanded
+                    if (isExpanded && comments == null) {
+                        isLoading = true
+                        scope.launch {
+                            try {
+                                val resStr = NetworkModule.api!!.getComments(postId).string()
+                                val element = com.google.gson.JsonParser().parse(resStr)
+                                comments = if (element.isJsonArray) {
+                                    Gson().fromJson(element, Array<Comment>::class.java).toList()
+                                } else if (element.isJsonObject && element.asJsonObject.has("comments")) {
+                                    Gson().fromJson(element.asJsonObject.get("comments"), Array<Comment>::class.java).toList()
+                                } else {
+                                    emptyList()
+                                }
+                            } catch (e: Exception) {
+                                comments = emptyList()
+                                withContext(Dispatchers.Main) { Toast.makeText(context, strings.loadFailed, Toast.LENGTH_SHORT).show() }
+                            } finally {
+                                isLoading = false
+                            }
+                        }
+                    }
+                }
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(strings.commentsTitle, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            Icon(if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        }
+
+        AnimatedVisibility(visible = isExpanded) {
+            Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                if (isLoading) {
+                    Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                    }
+                } else if (comments.isNullOrEmpty()) {
+                    Text(strings.noComments, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(12.dp), fontSize = 13.sp)
+                } else {
+                    comments!!.forEach { comment ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text(comment.creator_name ?: "Unknown", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+                                    Text("⭐ ${comment.score}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(comment.body ?: "", color = MaterialTheme.colorScheme.onBackground, fontSize = 13.sp)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1811,9 +2247,16 @@ fun VideoPlayer(exoPlayer: ExoPlayer) {
     )
 }
 
-fun downloadMediaWithRange(context: Context, url: String, fileName: String, md5: String?, ext: String, treeUriStr: String, encryptedPrefs: android.content.SharedPreferences, strings: AppStrings) {
-    val cfClearanceCookie = encryptedPrefs.getString("cfClearance", "") ?: ""
-
+fun downloadMediaWithRange(
+    context: Context,
+    url: String,
+    fileName: String,
+    md5: String?,
+    ext: String,
+    treeUriStr: String,
+    cfClearanceCookie: String,
+    strings: AppStrings
+) {
     if (!md5.isNullOrBlank()) {
         val cached = getCachedFile(context, md5, ext)
         if (cached != null) {
