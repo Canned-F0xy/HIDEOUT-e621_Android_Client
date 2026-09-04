@@ -31,12 +31,25 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
@@ -64,6 +77,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -98,7 +112,7 @@ import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
-import androidx.paging.compose.itemKey
+import androidx.paging.filter
 import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.decode.GifDecoder
@@ -124,7 +138,9 @@ import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.KeyStore
+import java.util.Collections
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -178,7 +194,6 @@ interface AppStrings {
     val tagInputHint: String
     val appSettings: String
     val useDarkTheme: String
-    val useDynamicColor: String
     val downloadLocation: String
     val defaultFolder: String
     val customFolder: String
@@ -291,7 +306,6 @@ object KoStrings : AppStrings {
     override val tagInputHint = "태그 입력 (예: gore)"
     override val appSettings = "앱 설정"
     override val useDarkTheme = "다크 테마 사용"
-    override val useDynamicColor = "다이내믹 컬러 (Material You)"
     override val downloadLocation = "다운로드 저장 위치 (터치하여 탐색기에서 변경)"
     override val defaultFolder = "📁 기본 폴더 (Pictures/HIDEOUT)"
     override val customFolder = "📁 사용자 지정 폴더"
@@ -319,8 +333,8 @@ object KoStrings : AppStrings {
     override val favAdded = "즐겨찾기(추천)에 추가되었습니다."
     override val favAddFailedLogin = "즐겨찾기 실패: 로그인을 확인해주세요."
     override fun favAddFailed(code: Int) = "추가 실패: HTTP $code"
-    override fun fileLabel(ext: String) = "파일: $ext"
-    override fun scoreLabel(score: Int) = "⭐ 추천 수: $score"
+    override fun fileLabel(ext: String) = "$ext"
+    override fun scoreLabel(score: Int) = "⭐ $score"
     override val descLabel = "설명"
     override val artistLabel = "🎨 작가 (Artist)"
     override val copyrightLabel = "📺 원작 (Copyright)"
@@ -372,7 +386,7 @@ object KoStrings : AppStrings {
     override val importFailed = "데이터 불러오기에 실패했습니다. 올바른 파일인지 확인해주세요."
     override val commentsTitle = "💬 댓글"
     override val noComments = "등록된 댓글이 없습니다."
-    override fun viewPool(poolId: Int) = "📚 풀 (Pool #$poolId) 모아보기"
+    override fun viewPool(poolId: Int) = "📚 풀 (Pool #$poolId)"
 }
 
 object EnStrings : AppStrings {
@@ -404,7 +418,6 @@ object EnStrings : AppStrings {
     override val tagInputHint = "Enter tag (e.g., gore)"
     override val appSettings = "App Settings"
     override val useDarkTheme = "Use Dark Theme"
-    override val useDynamicColor = "Dynamic Color (Material You)"
     override val downloadLocation = "Download Location (Tap to change)"
     override val defaultFolder = "📁 Default Folder (Pictures/HIDEOUT)"
     override val customFolder = "📁 Custom Folder"
@@ -432,8 +445,8 @@ object EnStrings : AppStrings {
     override val favAdded = "Added to favorites."
     override val favAddFailedLogin = "Favorite failed: Please check login."
     override fun favAddFailed(code: Int) = "Addition failed: HTTP $code"
-    override fun fileLabel(ext: String) = "File: $ext"
-    override fun scoreLabel(score: Int) = "⭐ Score: $score"
+    override fun fileLabel(ext: String) = "$ext"
+    override fun scoreLabel(score: Int) = "⭐ $score"
     override val descLabel = "Description"
     override val artistLabel = "🎨 Artist"
     override val copyrightLabel = "📺 Copyright"
@@ -492,6 +505,61 @@ val LocalStrings = staticCompositionLocalOf<AppStrings> { KoStrings }
 
 val Context.dataStore by preferencesDataStore(name = "hideout_datastore")
 
+object LocalPostManager {
+    val favoriteStates = mutableStateMapOf<Int, Boolean>()
+    val scoreStates = mutableStateMapOf<Int, Int>()
+
+    fun isFavorited(post: Post): Boolean {
+        return favoriteStates[post.id] ?: (post.is_favorited ?: false)
+    }
+
+    fun getScore(post: Post): Int {
+        return scoreStates[post.id] ?: (post.score?.total ?: 0)
+    }
+
+    fun toggleFavorite(post: Post) {
+        val currentFav = isFavorited(post)
+        val currentScore = getScore(post)
+        favoriteStates[post.id] = !currentFav
+        scoreStates[post.id] = currentScore + (if (currentFav) -1 else 1)
+    }
+
+    fun setFavorite(post: Post, fav: Boolean) {
+        val currentFav = isFavorited(post)
+        if (currentFav != fav) {
+            favoriteStates[post.id] = fav
+            scoreStates[post.id] = getScore(post) + (if (fav) 1 else -1)
+        }
+    }
+}
+
+@Composable
+fun Modifier.shimmerEffect(): Modifier {
+    val baseColor = MaterialTheme.colorScheme.surfaceVariant
+    val colors = listOf(
+        baseColor.copy(alpha = 0.3f),
+        baseColor.copy(alpha = 0.6f),
+        baseColor.copy(alpha = 0.3f)
+    )
+    val transition = rememberInfiniteTransition(label = "shimmer")
+    val translateAnim = transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 2000f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "shimmer_translation"
+    )
+    return this.background(
+        brush = Brush.linearGradient(
+            colors = colors,
+            start = Offset.Zero,
+            end = Offset(x = translateAnim.value, y = translateAnim.value)
+        )
+    )
+}
+
 object CryptoHelper {
     private const val KEY_ALIAS = "HideoutMasterKey"
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
@@ -543,7 +611,6 @@ object CryptoHelper {
 class AppPreferences(private val context: Context) {
     companion object {
         val KEY_DARK_THEME = booleanPreferencesKey("is_dark_theme")
-        val KEY_DYNAMIC_COLOR = booleanPreferencesKey("is_dynamic_color")
         val KEY_APP_LANGUAGE = stringPreferencesKey("app_language")
         val KEY_NSFW_ENABLED = booleanPreferencesKey("is_nsfw_enabled")
         val KEY_DOWNLOAD_TREE_URI = stringPreferencesKey("download_tree_uri")
@@ -560,7 +627,6 @@ class AppPreferences(private val context: Context) {
     }
 
     val isDarkTheme: Flow<Boolean> = context.dataStore.data.map { it[KEY_DARK_THEME] ?: true }
-    val isDynamicColor: Flow<Boolean> = context.dataStore.data.map { it[KEY_DYNAMIC_COLOR] ?: false }
     val appLanguage: Flow<String> = context.dataStore.data.map { it[KEY_APP_LANGUAGE] ?: "ko" }
     val isNsfwEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_NSFW_ENABLED] ?: false }
     val downloadTreeUri: Flow<String> = context.dataStore.data.map { it[KEY_DOWNLOAD_TREE_URI] ?: "" }
@@ -576,7 +642,6 @@ class AppPreferences(private val context: Context) {
     val mullvadPubKey: Flow<String> = context.dataStore.data.map { CryptoHelper.decrypt(it[KEY_ENC_MULLVAD_PUB] ?: "") }
 
     suspend fun setDarkTheme(value: Boolean) = context.dataStore.edit { it[KEY_DARK_THEME] = value }
-    suspend fun setDynamicColor(value: Boolean) = context.dataStore.edit { it[KEY_DYNAMIC_COLOR] = value }
     suspend fun setAppLanguage(value: String) = context.dataStore.edit { it[KEY_APP_LANGUAGE] = value }
     suspend fun setNsfwEnabled(value: Boolean) = context.dataStore.edit { it[KEY_NSFW_ENABLED] = value }
     suspend fun setDownloadTreeUri(value: String) = context.dataStore.edit { it[KEY_DOWNLOAD_TREE_URI] = value }
@@ -606,7 +671,6 @@ class AppPreferences(private val context: Context) {
         val data = context.dataStore.data.first()
         val exportObj = ExportSettings(
             darkTheme = data[KEY_DARK_THEME] ?: true,
-            dynamicColor = data[KEY_DYNAMIC_COLOR] ?: false,
             lang = data[KEY_APP_LANGUAGE] ?: "ko",
             downloadTreeUri = data[KEY_DOWNLOAD_TREE_URI] ?: "",
             blacklist = (data[KEY_BLACKLIST] ?: emptySet()).toList()
@@ -624,7 +688,6 @@ class AppPreferences(private val context: Context) {
             val importObj = Gson().fromJson(jsonString, ExportSettings::class.java)
             context.dataStore.edit {
                 it[KEY_DARK_THEME] = importObj.darkTheme
-                it[KEY_DYNAMIC_COLOR] = importObj.dynamicColor
                 it[KEY_APP_LANGUAGE] = importObj.lang
                 it[KEY_DOWNLOAD_TREE_URI] = importObj.downloadTreeUri
                 it[KEY_BLACKLIST] = importObj.blacklist.toSet()
@@ -638,7 +701,6 @@ class AppPreferences(private val context: Context) {
 
 data class ExportSettings(
     val darkTheme: Boolean,
-    val dynamicColor: Boolean,
     val lang: String,
     val downloadTreeUri: String,
     val blacklist: List<String>
@@ -778,7 +840,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
 
         setContent {
@@ -786,16 +847,10 @@ class MainActivity : ComponentActivity() {
             val appPrefs = remember { AppPreferences(context) }
 
             val isDarkTheme by appPrefs.isDarkTheme.collectAsState(initial = true)
-            val isDynamicColor by appPrefs.isDynamicColor.collectAsState(initial = false)
             val appLanguage by appPrefs.appLanguage.collectAsState(initial = "ko")
 
             val currentStrings = if (appLanguage == "en") EnStrings else KoStrings
-
-            val colorScheme = if (isDynamicColor && SDK_INT >= VERSION_CODES.S) {
-                if (isDarkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-            } else {
-                if (isDarkTheme) HideoutDarkTheme else HideoutLightTheme
-            }
+            val colorScheme = if (isDarkTheme) HideoutDarkTheme else HideoutLightTheme
 
             CompositionLocalProvider(LocalStrings provides currentStrings) {
                 MaterialTheme(colorScheme = colorScheme) {
@@ -804,7 +859,6 @@ class MainActivity : ComponentActivity() {
                             MainApp(
                                 appPrefs = appPrefs,
                                 isDarkTheme = isDarkTheme,
-                                isDynamicColor = isDynamicColor,
                                 appLanguage = appLanguage
                             )
                         }
@@ -819,7 +873,6 @@ class MainActivity : ComponentActivity() {
 fun MainApp(
     appPrefs: AppPreferences,
     isDarkTheme: Boolean,
-    isDynamicColor: Boolean,
     appLanguage: String
 ) {
     val context = LocalContext.current
@@ -958,7 +1011,15 @@ fun MainApp(
         )
     }
 
-    val lazyPagingItems: LazyPagingItems<Post> = pager.flow.collectAsLazyPagingItems()
+    val lazyPagingItems: LazyPagingItems<Post> = remember(pager) {
+        pager.flow.map { pagingData ->
+            val seen = Collections.newSetFromMap(ConcurrentHashMap<Int, Boolean>())
+            pagingData.filter { post ->
+                seen.add(post.id)
+            }
+        }
+    }.collectAsLazyPagingItems()
+
     val gridState = rememberLazyStaggeredGridState()
     var selectedPostIndex by remember { mutableStateOf<Int?>(null) }
 
@@ -1205,9 +1266,7 @@ fun MainApp(
                 },
                 onPostClick = { index -> selectedPostIndex = index },
                 isDarkTheme = isDarkTheme,
-                isDynamicColor = isDynamicColor,
                 onThemeToggle = { scope.launch { appPrefs.setDarkTheme(!isDarkTheme) } },
-                onDynamicColorToggle = { scope.launch { appPrefs.setDynamicColor(!isDynamicColor) } },
                 isNsfwEnabled = isNsfwEnabled,
                 onNsfwToggle = { scope.launch { appPrefs.setNsfwEnabled(!isNsfwEnabled) } },
                 loginUsername = loginUsername,
@@ -1336,8 +1395,7 @@ fun GalleryScreen(
     gridState: LazyStaggeredGridState,
     onSearchInputChange: (String) -> Unit, onSearch: () -> Unit,
     isVpnActive: Boolean, onVpnActionClick: () -> Unit, onPostClick: (Int) -> Unit,
-    isDarkTheme: Boolean, isDynamicColor: Boolean,
-    onThemeToggle: () -> Unit, onDynamicColorToggle: () -> Unit,
+    isDarkTheme: Boolean, onThemeToggle: () -> Unit,
     isNsfwEnabled: Boolean, onNsfwToggle: () -> Unit,
     loginUsername: String, loginApiKey: String, onLoginSave: (String, String) -> Unit,
     onFavoritesClick: () -> Unit, onHotPostsClick: () -> Unit,
@@ -1352,27 +1410,27 @@ fun GalleryScreen(
     val scope = rememberCoroutineScope()
     val strings = LocalStrings.current
 
-    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
-
     val screenWidth = LocalConfiguration.current.screenWidthDp
-    val gridColumns = when {
+    val initialColumns = when {
         screenWidth >= 840 -> 4
         screenWidth >= 600 -> 3
         else -> 2
     }
+    var gridColumns by remember { mutableIntStateOf(initialColumns) }
+    var currentZoom by remember { mutableFloatStateOf(1f) }
+
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     var isSearchFocused by remember { mutableStateOf(false) }
+    var expanded by remember { mutableStateOf(false) }
+    var tagSuggestions by remember { mutableStateOf<List<AutocompleteTag>>(emptyList()) }
+
     var showLoginDialog by remember { mutableStateOf(false) }
     var showBlacklistDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
 
     val savedTreeUri by appPrefs.downloadTreeUri.collectAsState(initial = "")
-
-    LaunchedEffect(Unit) {
-        delay(100)
-        focusManager.clearFocus(force = true)
-        keyboardController?.hide()
-    }
+    var isPillVisible by remember { mutableStateOf(true) }
 
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         uri?.let {
@@ -1404,151 +1462,191 @@ fun GalleryScreen(
         }
     }
 
+    val dirPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        uri?.let {
+            context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            scope.launch { appPrefs.setDownloadTreeUri(it.toString()) }
+            Toast.makeText(context, strings.settingsSaved, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val nestedScrollConnection = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (available.y < -10f && !isSearchFocused) {
+                    isPillVisible = false
+                } else if (available.y > 10f) {
+                    isPillVisible = true
+                }
+                return Offset.Zero
+            }
+        }
+    }
+
+    BackHandler(enabled = isSearchFocused || expanded) {
+        expanded = false
+        focusManager.clearFocus(force = true)
+        keyboardController?.hide()
+    }
+
+    LaunchedEffect(Unit) {
+        delay(100)
+        focusManager.clearFocus(force = true)
+        keyboardController?.hide()
+    }
+
     if (showLoginDialog) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         var tempUser by remember { mutableStateOf(loginUsername) }
         var tempKey by remember { mutableStateOf(loginApiKey) }
-        AlertDialog(
+
+        ModalBottomSheet(
             onDismissRequest = { showLoginDialog = false },
-            title = { Text(strings.accountLogin, color = MaterialTheme.colorScheme.primary) },
-            text = {
-                Column {
-                    Text(strings.apiKeyInfo, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(value = tempUser, onValueChange = { tempUser = it }, label = { Text(strings.usernameHint) }, singleLine = true)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(value = tempKey, onValueChange = { tempKey = it }, label = { Text(strings.apiKeyHint) }, singleLine = true, visualTransformation = PasswordVisualTransformation())
-                }
-            },
-            confirmButton = { TextButton(onClick = { onLoginSave(tempUser, tempKey); showLoginDialog = false }) { Text(strings.save, color = MaterialTheme.colorScheme.primary) } },
-            dismissButton = {
-                Row {
-                    if (loginUsername.isNotBlank()) TextButton(onClick = { onLoginSave("", ""); showLoginDialog = false }) { Text(strings.logout, color = Color.Red) }
-                    TextButton(onClick = { showLoginDialog = false }) { Text(strings.cancel, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                }
-            },
+            sheetState = sheetState,
             containerColor = MaterialTheme.colorScheme.surface
-        )
+        ) {
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp)) {
+                Text(strings.accountLogin, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(strings.apiKeyInfo, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(modifier = Modifier.height(24.dp))
+                OutlinedTextField(value = tempUser, onValueChange = { tempUser = it }, label = { Text(strings.usernameHint) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(value = tempKey, onValueChange = { tempKey = it }, label = { Text(strings.apiKeyHint) }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+                Spacer(modifier = Modifier.height(32.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    if (loginUsername.isNotBlank()) {
+                        TextButton(onClick = { onLoginSave("", ""); showLoginDialog = false }, modifier = Modifier.padding(end = 8.dp)) { Text(strings.logout, color = Color.Red) }
+                    }
+                    TextButton(onClick = { showLoginDialog = false }, modifier = Modifier.padding(end = 8.dp)) { Text(strings.cancel, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    Button(onClick = { onLoginSave(tempUser, tempKey); showLoginDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) { Text(strings.save, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold) }
+                }
+                Spacer(modifier = Modifier.height(WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()))
+            }
+        }
     }
 
     if (showBlacklistDialog) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         var newTag by remember { mutableStateOf("") }
         var currentList by remember { mutableStateOf(blacklistedTags) }
-        AlertDialog(
+
+        ModalBottomSheet(
             onDismissRequest = { showBlacklistDialog = false },
-            title = { Text(strings.blacklistManagement, color = MaterialTheme.colorScheme.primary) },
-            text = {
-                Column {
-                    Text(strings.blacklistInfo, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(value = newTag, onValueChange = { newTag = it }, modifier = Modifier.weight(1f), label = { Text(strings.tagInputHint) }, singleLine = true)
-                        IconButton(onClick = {
-                            if (newTag.isNotBlank() && !currentList.contains(newTag.trim())) { currentList = currentList + newTag.trim(); newTag = "" }
-                        }) { Icon(Icons.Default.Add, contentDescription = strings.cdAdd, tint = MaterialTheme.colorScheme.primary) }
+            sheetState = sheetState,
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp)) {
+                Text(strings.blacklistManagement, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(strings.blacklistInfo, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(modifier = Modifier.height(24.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(value = newTag, onValueChange = { newTag = it }, modifier = Modifier.weight(1f), label = { Text(strings.tagInputHint) }, singleLine = true)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    IconButton(onClick = {
+                        if (newTag.isNotBlank() && !currentList.contains(newTag.trim())) { currentList = currentList + newTag.trim(); newTag = "" }
+                    }, modifier = Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha=0.15f), RoundedCornerShape(12.dp))) {
+                        Icon(Icons.Default.Add, contentDescription = strings.cdAdd, tint = MaterialTheme.colorScheme.primary)
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
-                        items(currentList) { tag ->
-                            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                Text(tag, color = MaterialTheme.colorScheme.onBackground)
-                                IconButton(onClick = { currentList = currentList - tag }) { Icon(Icons.Default.Delete, contentDescription = strings.cdDelete, tint = Color.Red) }
-                            }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
+                    items(currentList) { tag ->
+                        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text(tag, color = MaterialTheme.colorScheme.onBackground)
+                            IconButton(onClick = { currentList = currentList - tag }) { Icon(Icons.Default.Delete, contentDescription = strings.cdDelete, tint = Color.Red) }
                         }
                     }
                 }
-            },
-            confirmButton = { TextButton(onClick = { onBlacklistSave(currentList); showBlacklistDialog = false }) { Text(strings.save, color = MaterialTheme.colorScheme.primary) } },
-            dismissButton = { TextButton(onClick = { showBlacklistDialog = false }) { Text(strings.cancel, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
-            containerColor = MaterialTheme.colorScheme.surface
-        )
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = { showBlacklistDialog = false }, modifier = Modifier.padding(end = 8.dp)) { Text(strings.cancel, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    Button(onClick = { onBlacklistSave(currentList); showBlacklistDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) { Text(strings.save, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold) }
+                }
+                Spacer(modifier = Modifier.height(WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()))
+            }
+        }
     }
 
     if (showSettingsDialog) {
-        val dirPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-            uri?.let {
-                context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                scope.launch { appPrefs.setDownloadTreeUri(it.toString()) }
-                Toast.makeText(context, strings.settingsSaved, Toast.LENGTH_SHORT).show()
-            }
-        }
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         var currentCacheSize by remember(showSettingsDialog) { mutableStateOf(getCacheSizeString(context)) }
 
-        AlertDialog(
+        ModalBottomSheet(
             onDismissRequest = { showSettingsDialog = false },
-            title = { Text(strings.appSettings, color = MaterialTheme.colorScheme.primary) },
-            text = {
-                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onThemeToggle() }.padding(vertical = 8.dp)) {
-                        Text(strings.useDarkTheme, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
-                        Switch(checked = isDarkTheme, onCheckedChange = { onThemeToggle() }, colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary, checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)))
-                    }
-                    if (SDK_INT >= VERSION_CODES.S) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onDynamicColorToggle() }.padding(vertical = 8.dp)) {
-                            Text(strings.useDynamicColor, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
-                            Switch(checked = isDynamicColor, onCheckedChange = { onDynamicColorToggle() }, colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary, checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)))
-                        }
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                        Text(strings.appLanguageLabel, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(strings.languageKo, fontWeight = if (appLanguage == "ko") FontWeight.Bold else FontWeight.Normal, color = if (appLanguage == "ko") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable { onLanguageChange("ko") }.padding(8.dp))
-                            Text("|", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(strings.languageEn, fontWeight = if (appLanguage == "en") FontWeight.Bold else FontWeight.Normal, color = if (appLanguage == "en") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable { onLanguageChange("en") }.padding(8.dp))
-                        }
-                    }
-                    Spacer(Modifier.height(16.dp))
-                    Text(strings.downloadLocation, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Box(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                        OutlinedButton(onClick = { dirPickerLauncher.launch(null) }, modifier = Modifier.fillMaxWidth()) {
-                            Text(if (savedTreeUri.isEmpty()) strings.defaultFolder else strings.customFolder, color = MaterialTheme.colorScheme.onSurface)
-                        }
-                    }
+            sheetState = sheetState,
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp).verticalScroll(rememberScrollState())) {
+                Text(strings.appSettings, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(24.dp))
 
-                    Spacer(Modifier.height(16.dp))
-                    Text(strings.cacheManagement, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("${strings.cacheSizeLabel}$currentCacheSize", color = MaterialTheme.colorScheme.onSurface)
-                        OutlinedButton(onClick = {
-                            context.cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-                            currentCacheSize = getCacheSizeString(context)
-                            Toast.makeText(context, strings.cacheCleared, Toast.LENGTH_SHORT).show()
-                        }) {
-                            Text(strings.clearCache, color = Color.Red)
-                        }
-                    }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onThemeToggle() }.padding(vertical = 8.dp)) {
+                    Text(strings.useDarkTheme, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                    Switch(checked = isDarkTheme, onCheckedChange = { onThemeToggle() }, colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary, checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)))
+                }
 
-                    Spacer(Modifier.height(24.dp))
-                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
-                    Spacer(Modifier.height(8.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        OutlinedButton(onClick = { exportLauncher.launch("hideout_settings_backup.json") }, modifier = Modifier.weight(1f).padding(end = 4.dp)) {
-                            Text(strings.exportSettings, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
-                        }
-                        OutlinedButton(onClick = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, modifier = Modifier.weight(1f).padding(start = 4.dp)) {
-                            Text(strings.importSettings, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
-                        }
+                Spacer(Modifier.height(16.dp))
+                Text(strings.appLanguageLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    Card(modifier = Modifier.weight(1f).clickable { onLanguageChange("ko") }, shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = if (appLanguage == "ko") MaterialTheme.colorScheme.primary.copy(alpha=0.1f) else MaterialTheme.colorScheme.surfaceVariant)) {
+                        Text(strings.languageKo, textAlign = TextAlign.Center, fontWeight = if (appLanguage == "ko") FontWeight.Bold else FontWeight.Normal, color = if (appLanguage == "ko") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(16.dp))
                     }
-
-                    Spacer(Modifier.height(16.dp))
-                    OutlinedButton(
-                        onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Canned-F0xy"))
-                            context.startActivity(intent)
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
-                    ) {
-                        Icon(Icons.Default.OpenInNew, contentDescription = strings.cdOpenBrowser, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(strings.devGithub, color = MaterialTheme.colorScheme.onSurface)
+                    Spacer(Modifier.width(12.dp))
+                    Card(modifier = Modifier.weight(1f).clickable { onLanguageChange("en") }, shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = if (appLanguage == "en") MaterialTheme.colorScheme.primary.copy(alpha=0.1f) else MaterialTheme.colorScheme.surfaceVariant)) {
+                        Text(strings.languageEn, textAlign = TextAlign.Center, fontWeight = if (appLanguage == "en") FontWeight.Bold else FontWeight.Normal, color = if (appLanguage == "en") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(16.dp))
                     }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = { showSettingsDialog = false }) { Text(strings.close, color = MaterialTheme.colorScheme.primary) }
-            },
-            containerColor = MaterialTheme.colorScheme.surface
-        )
+
+                Spacer(Modifier.height(24.dp))
+                Text(strings.downloadLocation, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Box(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    OutlinedButton(onClick = { dirPickerLauncher.launch(null) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
+                        Text(if (savedTreeUri.isEmpty()) strings.defaultFolder else strings.customFolder, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(vertical = 4.dp))
+                    }
+                }
+
+                Spacer(Modifier.height(24.dp))
+                Text(strings.cacheManagement, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("${strings.cacheSizeLabel}$currentCacheSize", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                    Button(onClick = {
+                        context.cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                        currentCacheSize = getCacheSizeString(context)
+                        Toast.makeText(context, strings.cacheCleared, Toast.LENGTH_SHORT).show()
+                    }, colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha=0.15f)), shape = RoundedCornerShape(12.dp)) {
+                        Text(strings.clearCache, color = Color.Red, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Spacer(Modifier.height(24.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                Spacer(Modifier.height(8.dp))
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    OutlinedButton(onClick = { exportLauncher.launch("hideout_settings_backup.json") }, modifier = Modifier.weight(1f).padding(end = 6.dp), shape = RoundedCornerShape(12.dp)) {
+                        Text(strings.exportSettings, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 4.dp))
+                    }
+                    OutlinedButton(onClick = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, modifier = Modifier.weight(1f).padding(start = 6.dp), shape = RoundedCornerShape(12.dp)) {
+                        Text(strings.importSettings, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 4.dp))
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+                OutlinedButton(
+                    onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Canned-F0xy"))) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Icon(Icons.Default.OpenInNew, contentDescription = strings.cdOpenBrowser, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(strings.devGithub, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(vertical = 4.dp))
+                }
+                Spacer(modifier = Modifier.height(WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()))
+            }
+        }
     }
 
     ModalNavigationDrawer(
@@ -1558,13 +1656,27 @@ fun GalleryScreen(
                 modifier = Modifier.width(300.dp),
                 drawerContainerColor = MaterialTheme.colorScheme.surface
             ) {
-                Column(modifier = Modifier.fillMaxWidth().padding(24.dp)) {
-                    Image(painter = painterResource(id = R.drawable.ic_launcher2), contentDescription = strings.cdLogo, modifier = Modifier.size(64.dp).clip(RoundedCornerShape(12.dp)))
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text("HIDEOUT", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black, letterSpacing = 2.sp), color = MaterialTheme.colorScheme.primary)
-                    Text("Ver. 2026-08-19", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(180.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                                    MaterialTheme.colorScheme.surface
+                                )
+                            )
+                        )
+                ) {
+                    Column(modifier = Modifier.align(Alignment.BottomStart).padding(24.dp)) {
+                        Image(painter = painterResource(id = R.drawable.ic_launcher2), contentDescription = strings.cdLogo, modifier = Modifier.size(64.dp).clip(RoundedCornerShape(16.dp)))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("HIDEOUT", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black, letterSpacing = 2.sp), color = MaterialTheme.colorScheme.primary)
+                        Text("Ver. 2026-09-04", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+
                 Spacer(modifier = Modifier.height(8.dp))
 
                 NavigationDrawerItem(
@@ -1572,35 +1684,40 @@ fun GalleryScreen(
                     selected = false,
                     onClick = { scope.launch { drawerState.close() }; showLoginDialog = true },
                     icon = { Icon(Icons.Default.Person, null, tint = MaterialTheme.colorScheme.primary) },
-                    modifier = Modifier.padding(horizontal = 12.dp)
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                    shape = RoundedCornerShape(50)
                 )
                 NavigationDrawerItem(
                     label = { Text(strings.viewFavorites) },
                     selected = false,
                     onClick = { scope.launch { drawerState.close() }; onFavoritesClick() },
                     icon = { Icon(Icons.Default.Star, null, tint = MaterialTheme.colorScheme.primary) },
-                    modifier = Modifier.padding(horizontal = 12.dp)
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                    shape = RoundedCornerShape(50)
                 )
                 NavigationDrawerItem(
                     label = { Text(strings.weeklyHot) },
                     selected = false,
                     onClick = { scope.launch { drawerState.close() }; onHotPostsClick() },
                     icon = { Icon(Icons.Default.TrendingUp, null, tint = MaterialTheme.colorScheme.primary) },
-                    modifier = Modifier.padding(horizontal = 12.dp)
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                    shape = RoundedCornerShape(50)
                 )
                 NavigationDrawerItem(
                     label = { Text(strings.manageBlacklist) },
                     selected = false,
                     onClick = { scope.launch { drawerState.close() }; showBlacklistDialog = true },
                     icon = { Icon(Icons.Default.Block, null, tint = MaterialTheme.colorScheme.primary) },
-                    modifier = Modifier.padding(horizontal = 12.dp)
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                    shape = RoundedCornerShape(50)
                 )
                 NavigationDrawerItem(
                     label = { Text(if (isNsfwEnabled) strings.r18ModeOn else strings.r18ModeOff, color = if (isNsfwEnabled) Color.Red else MaterialTheme.colorScheme.onSurface) },
                     selected = false,
                     onClick = { scope.launch { drawerState.close() }; onNsfwToggle() },
                     icon = { Icon(Icons.Default.Warning, null, tint = if (isNsfwEnabled) Color.Red else MaterialTheme.colorScheme.primary) },
-                    modifier = Modifier.padding(horizontal = 12.dp)
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                    shape = RoundedCornerShape(50)
                 )
                 Spacer(modifier = Modifier.weight(1f))
                 HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
@@ -1609,38 +1726,23 @@ fun GalleryScreen(
                     selected = false,
                     onClick = { scope.launch { drawerState.close() }; showSettingsDialog = true },
                     icon = { Icon(Icons.Default.Settings, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp)
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+                    shape = RoundedCornerShape(50)
                 )
             }
         }
     ) {
         Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text("HIDEOUT", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black) },
-                    navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.Default.Menu, strings.cdOpenMenu, tint = MaterialTheme.colorScheme.primary)
-                        }
-                    },
-                    actions = {
-                        TextButton(onClick = onVpnActionClick) {
-                            Text(if (isVpnActive) strings.disableWireGuard else strings.enableWireGuard, color = if (isVpnActive) Color.Red else MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
-                )
-            }
+            containerColor = MaterialTheme.colorScheme.background
         ) { innerPadding ->
-            Column(
-                modifier = Modifier.fillMaxSize()
-                    .pointerInput(Unit) { detectTapGestures(onTap = { focusManager.clearFocus(force = true); keyboardController?.hide() }) }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
                     .padding(innerPadding)
+                    .nestedScroll(nestedScrollConnection)
+                    .pointerInput(Unit) { detectTapGestures(onTap = { focusManager.clearFocus(force = true); keyboardController?.hide() }) }
             ) {
                 Box(modifier = Modifier.size(0.dp).focusRequester(focusRequester).focusable())
-
-                var expanded by remember { mutableStateOf(false) }
-                var tagSuggestions by remember { mutableStateOf<List<AutocompleteTag>>(emptyList()) }
 
                 LaunchedEffect(searchInput, isSearchFocused) {
                     if (!isSearchFocused) { expanded = false; return@LaunchedEffect }
@@ -1654,20 +1756,207 @@ fun GalleryScreen(
                     } else { expanded = false }
                 }
 
-                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    TextField(
-                        value = searchInput, onValueChange = onSearchInputChange,
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(50)).onFocusChanged { focusState -> isSearchFocused = focusState.isFocused },
-                        placeholder = { Text(strings.searchTags, color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = strings.cdSearch, tint = MaterialTheme.colorScheme.primary) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = { expanded = false; onSearch(); focusManager.clearFocus(force = true); keyboardController?.hide() }),
-                        colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, focusedContainerColor = MaterialTheme.colorScheme.surface, unfocusedContainerColor = MaterialTheme.colorScheme.surface)
-                    )
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Box(modifier = Modifier.fillMaxSize()
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    if (event.changes.size >= 2) {
+                                        val zoom = event.calculateZoom()
+                                        currentZoom *= zoom
+                                        if (currentZoom > 1.2f) {
+                                            if (gridColumns > 1) gridColumns -= 1
+                                            currentZoom = 1f
+                                        } else if (currentZoom < 0.8f) {
+                                            if (gridColumns < 5) gridColumns += 1
+                                            currentZoom = 1f
+                                        }
+                                        event.changes.forEach { it.consume() }
+                                    } else {
+                                        currentZoom = 1f
+                                    }
+                                }
+                            }
+                        }
+                    ) {
+                        if (lazyPagingItems.itemCount == 0 && lazyPagingItems.loadState.refresh is LoadState.Loading) {
+                            val shimmerHeights = remember { List(12) { (150..250).random().dp } }
+                            LazyVerticalStaggeredGrid(
+                                columns = StaggeredGridCells.Fixed(gridColumns),
+                                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 88.dp, bottom = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalItemSpacing = 12.dp,
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                items(shimmerHeights.size) { index ->
+                                    Box(modifier = Modifier.fillMaxWidth().height(shimmerHeights[index]).clip(RoundedCornerShape(12.dp)).shimmerEffect())
+                                }
+                            }
+                        } else if (lazyPagingItems.itemCount == 0 && lazyPagingItems.loadState.refresh is LoadState.Error) {
+                            val state = lazyPagingItems.loadState.refresh as LoadState.Error
+                            Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(16.dp)) {
+                                    Icon(Icons.Default.Warning, contentDescription = strings.cdError, tint = Color.Red, modifier = Modifier.size(48.dp))
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text(strings.loadFailed, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
+                                    Text(state.error.localizedMessage ?: "Unknown Error", color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 12.dp))
+                                    Button(onClick = { lazyPagingItems.retry() }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) { Text(strings.retry, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold) }
+                                }
+                            }
+                        } else if (lazyPagingItems.itemCount == 0 && lazyPagingItems.loadState.refresh is LoadState.NotLoading) {
+                            Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(16.dp)) {
+                                    Icon(Icons.Default.Warning, contentDescription = strings.cdNoResults, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(64.dp))
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text(strings.noResults, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        } else {
+                            LazyVerticalStaggeredGrid(
+                                columns = StaggeredGridCells.Fixed(gridColumns),
+                                state = gridState,
+                                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 88.dp, bottom = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalItemSpacing = 12.dp,
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                items(
+                                    count = lazyPagingItems.itemCount,
+                                    key = { index ->
+                                        val post = lazyPagingItems.peek(index)
+                                        if (post != null) "${post.id}_$index" else index
+                                    }
+                                ) { index ->
+                                    val post = lazyPagingItems[index]
+                                    if (post != null) {
+                                        val ext = post.file?.ext ?: ""
+                                        val md5 = post.file?.md5 ?: ""
+                                        val cachedFile = getCachedFile(context, md5, ext)
+                                        val imageModel = cachedFile ?: post.preview?.url
 
-                    if (expanded && tagSuggestions.isNotEmpty()) {
-                        Card(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), shape = RoundedCornerShape(16.dp), elevation = CardDefaults.cardElevation(8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                                        Card(
+                                            modifier = Modifier.fillMaxWidth().clickable { focusManager.clearFocus(force = true); keyboardController?.hide(); onPostClick(index) },
+                                            shape = RoundedCornerShape(12.dp), elevation = CardDefaults.cardElevation(0.dp),
+                                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                                        ) {
+                                            Box(modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp), contentAlignment = Alignment.Center) {
+                                                if (imageModel != null) {
+                                                    AsyncImage(model = imageRequest(context, imageModel), contentDescription = "${strings.idLabel(post.id)}", modifier = Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
+                                                } else {
+                                                    Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                }
+
+                                                if (LocalPostManager.isFavorited(post)) {
+                                                    Icon(
+                                                        Icons.Default.Favorite,
+                                                        contentDescription = null,
+                                                        tint = Color.Red,
+                                                        modifier = Modifier
+                                                            .align(Alignment.TopEnd)
+                                                            .padding(8.dp)
+                                                            .size(20.dp)
+                                                    )
+                                                }
+
+                                                if (ext.isNotBlank()) {
+                                                    Box(modifier = Modifier.align(Alignment.BottomStart).padding(6.dp).background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                                                        Text(ext.uppercase(), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                    }
+                                                }
+
+                                                if ((ext == "webm" || ext == "mp4") && post.duration != null && post.duration > 0) {
+                                                    Box(modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp).background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                                                        Text(formatDuration(post.duration), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.TopCenter)
+                        .padding(horizontal = 16.dp)
+                        .padding(top = 16.dp)
+                ) {
+                    AnimatedVisibility(
+                        visible = isPillVisible || isSearchFocused,
+                        enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+                        exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut()
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                            shadowElevation = 12.dp,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                    Icon(Icons.Default.Menu, contentDescription = strings.cdOpenMenu, tint = MaterialTheme.colorScheme.primary)
+                                }
+
+                                val titleText = when {
+                                    currentAppliedTag == "#HOT#" -> strings.weeklyHot
+                                    currentAppliedTag.isBlank() -> strings.latestPosts
+                                    else -> strings.searchResults(currentAppliedTag)
+                                }
+
+                                TextField(
+                                    value = searchInput,
+                                    onValueChange = onSearchInputChange,
+                                    modifier = Modifier.weight(1f).onFocusChanged { focusState -> isSearchFocused = focusState.isFocused },
+                                    placeholder = {
+                                        Text(
+                                            if (isSearchFocused) strings.searchTags else titleText,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            fontSize = 14.sp
+                                        )
+                                    },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                    keyboardActions = KeyboardActions(onSearch = { expanded = false; onSearch(); focusManager.clearFocus(force = true); keyboardController?.hide() }),
+                                    colors = TextFieldDefaults.colors(
+                                        focusedContainerColor = Color.Transparent,
+                                        unfocusedContainerColor = Color.Transparent,
+                                        focusedIndicatorColor = Color.Transparent,
+                                        unfocusedIndicatorColor = Color.Transparent,
+                                        cursorColor = MaterialTheme.colorScheme.primary
+                                    )
+                                )
+
+                                IconButton(onClick = onVpnActionClick) {
+                                    Icon(
+                                        imageVector = Icons.Default.VpnKey,
+                                        contentDescription = strings.enableWireGuard,
+                                        tint = if (isVpnActive) Color.Red else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    AnimatedVisibility(
+                        visible = expanded && tagSuggestions.isNotEmpty(),
+                        enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
+                        exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top)
+                    ) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                            shape = RoundedCornerShape(24.dp),
+                            elevation = CardDefaults.cardElevation(8.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f))
+                        ) {
                             LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
                                 items(tagSuggestions) { tag ->
                                     Row(
@@ -1677,101 +1966,15 @@ fun GalleryScreen(
                                             words.add(tag.name)
                                             onSearchInputChange(words.joinToString(" ") + " ")
                                             expanded = false
-                                        }.padding(16.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically
+                                        }.padding(horizontal = 20.dp, vertical = 14.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(tag.name, color = MaterialTheme.colorScheme.onBackground)
+                                        Text(tag.name, color = MaterialTheme.colorScheme.onBackground, fontWeight = FontWeight.SemiBold)
                                         Text("${tag.post_count}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                                     }
-                                    if (tag != tagSuggestions.last()) Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)))
-                                }
-                            }
-                        }
-                    }
-                }
-
-                val titleText = when {
-                    currentAppliedTag == "#HOT#" -> strings.weeklyHot
-                    currentAppliedTag.isBlank() -> strings.latestPosts
-                    else -> strings.searchResults(currentAppliedTag)
-                }
-                Text(text = titleText, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp))
-
-                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-
-                    LazyVerticalStaggeredGrid(
-                        columns = StaggeredGridCells.Fixed(gridColumns),
-                        state = gridState,
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalItemSpacing = 12.dp,
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        items(count = lazyPagingItems.itemCount) { index ->
-                            val post = lazyPagingItems[index]
-                            if (post != null) {
-                                val ext = post.file?.ext ?: ""
-                                val md5 = post.file?.md5 ?: ""
-                                val cachedFile = getCachedFile(context, md5, ext)
-                                val imageModel = cachedFile ?: post.preview?.url
-
-                                Card(
-                                    modifier = Modifier.fillMaxWidth().clickable { focusManager.clearFocus(force = true); keyboardController?.hide(); onPostClick(index) },
-                                    shape = RoundedCornerShape(12.dp), elevation = CardDefaults.cardElevation(0.dp),
-                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                                ) {
-                                    Box(modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp), contentAlignment = Alignment.Center) {
-                                        if (imageModel != null) {
-                                            AsyncImage(model = imageRequest(context, imageModel), contentDescription = "${strings.idLabel(post.id)}", modifier = Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
-                                        } else {
-                                            Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-
-                                        if (ext.isNotBlank()) {
-                                            Box(modifier = Modifier.align(Alignment.BottomStart).padding(6.dp).background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                                                Text(ext.uppercase(), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                            }
-                                        }
-
-                                        if ((ext == "webm" || ext == "mp4") && post.duration != null && post.duration > 0) {
-                                            Box(modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp).background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                                                Text(formatDuration(post.duration), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    when (val state = lazyPagingItems.loadState.refresh) {
-                        is LoadState.Loading -> {
-                            if (lazyPagingItems.itemCount == 0) {
-                                Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
-                                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(48.dp))
-                                }
-                            }
-                        }
-                        is LoadState.Error -> {
-                            if (lazyPagingItems.itemCount == 0) {
-                                Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(16.dp)) {
-                                        Icon(Icons.Default.Warning, contentDescription = strings.cdError, tint = Color.Red, modifier = Modifier.size(48.dp))
-                                        Spacer(modifier = Modifier.height(16.dp))
-                                        Text(strings.loadFailed, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
-                                        Text(state.error.localizedMessage ?: "Unknown Error", color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 12.dp))
-                                        Button(onClick = { lazyPagingItems.retry() }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) { Text(strings.retry, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold) }
-                                    }
-                                }
-                            }
-                        }
-                        is LoadState.NotLoading -> {
-                            if (lazyPagingItems.itemCount == 0 && state.endOfPaginationReached) {
-                                Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(16.dp)) {
-                                        Icon(Icons.Default.Warning, contentDescription = strings.cdNoResults, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(64.dp))
-                                        Spacer(modifier = Modifier.height(16.dp))
-                                        Text(strings.noResults, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                    if (tag != tagSuggestions.last()) {
+                                        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)))
                                     }
                                 }
                             }
@@ -1817,7 +2020,7 @@ fun DetailPagerScreen(
             )
         } else {
             Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                Box(modifier = Modifier.fillMaxSize().shimmerEffect())
             }
         }
     }
@@ -1837,8 +2040,6 @@ fun DetailScreen(
     val scope = rememberCoroutineScope()
     val strings = LocalStrings.current
     var isFullScreen by remember { mutableStateOf(false) }
-    var isFavorited by remember(post.id, post.is_favorited) { mutableStateOf(post.is_favorited ?: false) }
-    var currentScore by remember(post.id, post.score?.total) { mutableIntStateOf(post.score?.total ?: 0) }
 
     val savedTreeUri by appPrefs.downloadTreeUri.collectAsState(initial = "")
     val cfClearanceCookie by appPrefs.cfClearance.collectAsState(initial = "")
@@ -1846,6 +2047,10 @@ fun DetailScreen(
     val ext = post.file?.ext ?: ""
     val md5 = post.file?.md5 ?: ""
     val cachedFile = getCachedFile(context, md5, ext)
+
+    var showBigHeart by remember { mutableStateOf(false) }
+    val bigHeartScale = remember { Animatable(0f) }
+    val bigHeartAlpha = remember { Animatable(0f) }
 
     val gifEnabledLoader = remember {
         ImageLoader.Builder(context)
@@ -1963,140 +2168,253 @@ fun DetailScreen(
                     }
                 }
             },
-        topBar = {
-            TopAppBar(
-                title = { Text(strings.idLabel(post.id), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary) },
-                navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.Default.ArrowBack, contentDescription = strings.cdBack, tint = MaterialTheme.colorScheme.onBackground) } },
-                actions = {
-                    IconButton(onClick = {
-                        scope.launch {
-                            try {
-                                if (isFavorited) {
-                                    val response = NetworkModule.api!!.removeFavorite(post.id)
-                                    if (response.isSuccessful || response.code() == 404) {
-                                        isFavorited = false
-                                        currentScore -= 1
-                                        Toast.makeText(context, strings.favRemoved, Toast.LENGTH_SHORT).show()
-                                    } else { Toast.makeText(context, strings.favRemoveFailed(response.code()), Toast.LENGTH_SHORT).show() }
-                                } else {
-                                    val response = NetworkModule.api!!.addFavorite(post.id)
-                                    if (response.isSuccessful || response.code() == 422) {
-                                        isFavorited = true
-                                        currentScore += 1
-                                        Toast.makeText(context, strings.favAdded, Toast.LENGTH_SHORT).show()
-                                    } else if (response.code() == 401 || response.code() == 403) {
-                                        Toast.makeText(context, strings.favAddFailedLogin, Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        Toast.makeText(context, strings.favAddFailed(response.code()), Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            } catch (e: Exception) { Toast.makeText(context, strings.networkErrorOccurred, Toast.LENGTH_SHORT).show() }
-                        }
-                    }) { Icon(imageVector = if (isFavorited) Icons.Default.Favorite else Icons.Default.FavoriteBorder, contentDescription = strings.cdFavoriteToggle, tint = MaterialTheme.colorScheme.primary) }
-                    if (post.file?.url != null) {
-                        IconButton(onClick = {
-                            downloadMediaWithRange(
-                                context = context,
-                                url = post.file.url,
-                                fileName = "Hideout_${post.id}.$ext",
-                                md5 = md5,
-                                ext = ext,
-                                treeUriStr = savedTreeUri,
-                                cfClearanceCookie = cfClearanceCookie,
-                                strings = strings
-                            )
-                        }) { Icon(Icons.Default.Download, contentDescription = strings.cdDownload, tint = MaterialTheme.colorScheme.primary) }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
-            )
-        },
         containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
-        Column(modifier = Modifier.fillMaxSize().padding(innerPadding).verticalScroll(scrollState)) {
-            Box(modifier = Modifier.fillMaxWidth().heightIn(min = 300.dp, max = 600.dp).background(Color.Black), contentAlignment = Alignment.Center) {
-                if (ext == "webm" || ext == "mp4") {
-                    if (post.file?.url != null) {
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            if (!isFullScreen && exoPlayer != null) {
-                                VideoPlayer(exoPlayer = exoPlayer!!)
-                            }
-                            IconButton(onClick = { isFullScreen = true }, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
-                                Icon(Icons.Default.Fullscreen, contentDescription = strings.cdFullscreen, tint = Color.White, modifier = Modifier.size(32.dp))
-                            }
-                        }
-                    }
-                } else if (post.file?.url != null) {
-                    val displayUrl = post.sample?.url ?: post.file.url
-                    val detailImageRequest = remember(cachedFile, displayUrl) {
-                        ImageRequest.Builder(context).data(cachedFile ?: displayUrl).crossfade(200).build()
-                    }
-                    AsyncImage(
-                        model = detailImageRequest,
-                        imageLoader = gifEnabledLoader,
-                        contentDescription = "Full Image",
-                        modifier = Modifier.fillMaxSize().clickable { isFullScreen = true },
-                        contentScale = ContentScale.Fit
-                    )
-                }
-            }
-
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text(strings.fileLabel(ext.uppercase()), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(strings.scoreLabel(currentScore), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-
-                post.pools?.forEach { poolId ->
-                    Button(
-                        onClick = { onTagClick("pool:$poolId") },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                    ) { Text(strings.viewPool(poolId), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) }
-                }
-
-                post.getAllRelatedIdsQuery()?.let { query ->
-                    Button(
-                        onClick = { onTagClick(query) },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
-                    ) { Text(strings.viewAllRelated, color = MaterialTheme.colorScheme.primary) }
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
-
-                if (!post.description.isNullOrBlank()) {
-                    Text(strings.descLabel, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-                    Text(post.description, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(vertical = 4.dp))
-                    Spacer(modifier = Modifier.height(16.dp))
-                }
-
-                TagSection(title = strings.artistLabel, tags = post.tags?.artist ?: emptyList(), color = Color(0xFFFF5252), onTagClick = onTagClick)
-                TagSection(title = strings.copyrightLabel, tags = post.tags?.copyright ?: emptyList(), color = Color(0xFFE040FB), onTagClick = onTagClick)
-                TagSection(title = strings.characterLabel, tags = post.tags?.character ?: emptyList(), color = Color(0xFF69F0AE), onTagClick = onTagClick)
-                TagSection(title = strings.generalLabel, tags = post.tags?.general ?: emptyList(), color = Color(0xFF40C4FF), onTagClick = onTagClick)
-
-                if (!post.sources.isNullOrEmpty()) {
-                    val sourcesTextColor = if (isDarkTheme) Color.White else Color.Black
-                    Text(strings.sourcesLabel, style = MaterialTheme.typography.titleSmall, color = sourcesTextColor)
-                    FlowRow(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        post.sources.forEach { sourceUrl ->
-                            Box(modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFF40C4FF).copy(alpha = 0.15f)).clickable {
-                                try {
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(sourceUrl))
-                                    context.startActivity(intent)
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, strings.cannotOpenLink, Toast.LENGTH_SHORT).show()
+        Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+            Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
+                Box(modifier = Modifier.fillMaxWidth().heightIn(min = 300.dp, max = 600.dp).background(Color.Black), contentAlignment = Alignment.Center) {
+                    if (ext == "webm" || ext == "mp4") {
+                        if (post.file?.url != null) {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                if (!isFullScreen && exoPlayer != null) {
+                                    VideoPlayer(exoPlayer = exoPlayer!!)
                                 }
-                            }.padding(horizontal = 8.dp, vertical = 4.dp)) {
-                                Text(sourceUrl, color = Color(0xFF40C4FF), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                                IconButton(onClick = { isFullScreen = true }, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) {
+                                    Icon(Icons.Default.Fullscreen, contentDescription = strings.cdFullscreen, tint = Color.White, modifier = Modifier.size(32.dp))
+                                }
+                            }
+                        }
+                    } else if (post.file?.url != null) {
+                        val displayUrl = post.sample?.url ?: post.file.url
+                        val detailImageRequest = remember(cachedFile, displayUrl) {
+                            ImageRequest.Builder(context).data(cachedFile ?: displayUrl).crossfade(200).build()
+                        }
+                        AsyncImage(
+                            model = detailImageRequest,
+                            imageLoader = gifEnabledLoader,
+                            contentDescription = "Full Image",
+                            modifier = Modifier.fillMaxSize().pointerInput(Unit) {
+                                detectTapGestures(
+                                    onTap = { isFullScreen = true },
+                                    onDoubleTap = {
+                                        scope.launch {
+                                            showBigHeart = true
+                                            bigHeartScale.snapTo(0f)
+                                            bigHeartAlpha.snapTo(1f)
+                                            launch { bigHeartScale.animateTo(1.5f, tween(400, easing = FastOutSlowInEasing)) }
+                                            launch {
+                                                delay(200)
+                                                bigHeartAlpha.animateTo(0f, tween(300))
+                                            }
+                                        }
+                                        if (!LocalPostManager.isFavorited(post)) {
+                                            LocalPostManager.setFavorite(post, true)
+                                            scope.launch {
+                                                try {
+                                                    val response = NetworkModule.api!!.addFavorite(post.id)
+                                                    if (!(response.isSuccessful || response.code() == 422)) {
+                                                        LocalPostManager.setFavorite(post, false)
+                                                        if (response.code() == 401 || response.code() == 403) {
+                                                            Toast.makeText(context, strings.favAddFailedLogin, Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    }
+                                                } catch (e: Exception) {
+                                                    LocalPostManager.setFavorite(post, false)
+                                                }
+                                            }
+                                        }
+                                    }
+                                )
+                            },
+                            contentScale = ContentScale.Fit
+                        )
+                    }
+
+                    if (showBigHeart) {
+                        Icon(
+                            Icons.Default.Favorite,
+                            contentDescription = null,
+                            tint = Color.Red.copy(alpha = bigHeartAlpha.value),
+                            modifier = Modifier
+                                .size(100.dp)
+                                .graphicsLayer(scaleX = bigHeartScale.value, scaleY = bigHeartScale.value)
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().systemBarsPadding().padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        IconButton(
+                            onClick = onClose,
+                            modifier = Modifier.background(Color.Black.copy(alpha=0.5f), RoundedCornerShape(50))
+                        ) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = strings.cdBack, tint = Color.White)
+                        }
+
+                        if (post.file?.url != null) {
+                            IconButton(
+                                onClick = {
+                                    downloadMediaWithRange(
+                                        context = context,
+                                        url = post.file.url,
+                                        fileName = "Hideout_${post.id}.$ext",
+                                        md5 = md5,
+                                        ext = ext,
+                                        treeUriStr = savedTreeUri,
+                                        cfClearanceCookie = cfClearanceCookie,
+                                        strings = strings
+                                    )
+                                },
+                                modifier = Modifier.background(Color.Black.copy(alpha=0.5f), RoundedCornerShape(50))
+                            ) {
+                                Icon(Icons.Default.Download, contentDescription = strings.cdDownload, tint = Color.White)
                             }
                         }
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
                 }
 
-                CommentsSection(postId = post.id)
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Card(
+                            modifier = Modifier.weight(1f).height(76.dp),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                        ) {
+                            Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalArrangement = Arrangement.Center) {
+                                Text(strings.fileLabel(ext.uppercase()), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(strings.scoreLabel(LocalPostManager.getScore(post)), fontSize = 20.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+
+                        Card(
+                            modifier = Modifier.size(76.dp).clip(RoundedCornerShape(24.dp)).clickable {
+                                val wasFavorited = LocalPostManager.isFavorited(post)
+                                LocalPostManager.toggleFavorite(post)
+
+                                scope.launch {
+                                    try {
+                                        if (wasFavorited) {
+                                            val response = NetworkModule.api!!.removeFavorite(post.id)
+                                            if (response.isSuccessful || response.code() == 404) {
+                                                Toast.makeText(context, strings.favRemoved, Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                LocalPostManager.setFavorite(post, true)
+                                                Toast.makeText(context, strings.favRemoveFailed(response.code()), Toast.LENGTH_SHORT).show()
+                                            }
+                                        } else {
+                                            val response = NetworkModule.api!!.addFavorite(post.id)
+                                            if (response.isSuccessful || response.code() == 422) {
+                                                Toast.makeText(context, strings.favAdded, Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                LocalPostManager.setFavorite(post, false)
+                                                if (response.code() == 401 || response.code() == 403) {
+                                                    Toast.makeText(context, strings.favAddFailedLogin, Toast.LENGTH_SHORT).show()
+                                                } else {
+                                                    Toast.makeText(context, strings.favAddFailed(response.code()), Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        }
+                                    } catch (e: Exception) {
+                                        LocalPostManager.setFavorite(post, wasFavorited)
+                                        Toast.makeText(context, strings.networkErrorOccurred, Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            },
+                            shape = RoundedCornerShape(24.dp),
+                            colors = CardDefaults.cardColors(containerColor = if (LocalPostManager.isFavorited(post)) MaterialTheme.colorScheme.primary.copy(alpha=0.15f) else MaterialTheme.colorScheme.surfaceVariant)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = if (LocalPostManager.isFavorited(post)) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                    contentDescription = strings.cdFavoriteToggle,
+                                    tint = if (LocalPostManager.isFavorited(post)) Color.Red else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    val hasPool = !post.pools.isNullOrEmpty()
+                    val relatedQuery = post.getAllRelatedIdsQuery()
+                    if (hasPool || relatedQuery != null) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            if (hasPool) {
+                                Card(
+                                    modifier = Modifier.weight(1f).height(64.dp).clip(RoundedCornerShape(20.dp)).clickable { onTagClick("pool:${post.pools!!.first()}") },
+                                    shape = RoundedCornerShape(20.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                                ) {
+                                    Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.List, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(strings.viewPool(post.pools!!.first()), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
+                            }
+                            if (relatedQuery != null) {
+                                Card(
+                                    modifier = Modifier.weight(1f).height(64.dp).clip(RoundedCornerShape(20.dp)).clickable { onTagClick(relatedQuery) },
+                                    shape = RoundedCornerShape(20.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                                ) {
+                                    Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Share, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(strings.viewAllRelated, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (!post.description.isNullOrBlank()) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha=0.5f))
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(strings.descLabel, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 8.dp))
+                                Text(post.description, color = MaterialTheme.colorScheme.onBackground, fontSize = 14.sp)
+                            }
+                        }
+                    }
+
+                    TagSection(title = strings.artistLabel, tags = post.tags?.artist ?: emptyList(), color = Color(0xFFFF5252), onTagClick = onTagClick)
+                    TagSection(title = strings.copyrightLabel, tags = post.tags?.copyright ?: emptyList(), color = Color(0xFFE040FB), onTagClick = onTagClick)
+                    TagSection(title = strings.characterLabel, tags = post.tags?.character ?: emptyList(), color = Color(0xFF69F0AE), onTagClick = onTagClick)
+                    TagSection(title = strings.generalLabel, tags = post.tags?.general ?: emptyList(), color = Color(0xFF40C4FF), onTagClick = onTagClick)
+
+                    if (!post.sources.isNullOrEmpty()) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha=0.5f))
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(strings.sourcesLabel, fontWeight = FontWeight.Bold, color = if (isDarkTheme) Color.White else Color.Black, modifier = Modifier.padding(bottom = 8.dp))
+                                post.sources.forEach { sourceUrl ->
+                                    Text(
+                                        text = sourceUrl,
+                                        color = Color(0xFF40C4FF),
+                                        fontSize = 13.sp,
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
+                                            try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(sourceUrl))) } catch(e:Exception){}
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    CommentsSection(postId = post.id)
+
+                    Spacer(modifier = Modifier.height(40.dp))
+                }
             }
         }
     }
@@ -2111,66 +2429,72 @@ fun CommentsSection(postId: Int) {
     var isLoading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    Column(modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .clickable {
-                    isExpanded = !isExpanded
-                    if (isExpanded && comments == null) {
-                        isLoading = true
-                        scope.launch {
-                            try {
-                                val resStr = NetworkModule.api!!.getComments(postId).string()
-                                val element = com.google.gson.JsonParser().parse(resStr)
-                                comments = if (element.isJsonArray) {
-                                    Gson().fromJson(element, Array<Comment>::class.java).toList()
-                                } else if (element.isJsonObject && element.asJsonObject.has("comments")) {
-                                    Gson().fromJson(element.asJsonObject.get("comments"), Array<Comment>::class.java).toList()
-                                } else {
-                                    emptyList()
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        isExpanded = !isExpanded
+                        if (isExpanded && comments == null) {
+                            isLoading = true
+                            scope.launch {
+                                try {
+                                    val resStr = NetworkModule.api!!.getComments(postId).string()
+                                    val element = com.google.gson.JsonParser().parse(resStr)
+                                    comments = if (element.isJsonArray) {
+                                        Gson().fromJson(element, Array<Comment>::class.java).toList()
+                                    } else if (element.isJsonObject && element.asJsonObject.has("comments")) {
+                                        Gson().fromJson(element.asJsonObject.get("comments"), Array<Comment>::class.java).toList()
+                                    } else {
+                                        emptyList()
+                                    }
+                                } catch (e: Exception) {
+                                    comments = emptyList()
+                                    withContext(Dispatchers.Main) { Toast.makeText(context, strings.loadFailed, Toast.LENGTH_SHORT).show() }
+                                } finally {
+                                    isLoading = false
                                 }
-                            } catch (e: Exception) {
-                                comments = emptyList()
-                                withContext(Dispatchers.Main) { Toast.makeText(context, strings.loadFailed, Toast.LENGTH_SHORT).show() }
-                            } finally {
-                                isLoading = false
                             }
                         }
                     }
-                }
-                .padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(strings.commentsTitle, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-            Icon(if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-        }
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(strings.commentsTitle, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                Icon(if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            }
 
-        AnimatedVisibility(visible = isExpanded) {
-            Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                if (isLoading) {
-                    Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
-                    }
-                } else if (comments.isNullOrEmpty()) {
-                    Text(strings.noComments, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(12.dp), fontSize = 13.sp)
-                } else {
-                    comments!!.forEach { comment ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text(comment.creator_name ?: "Unknown", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
-                                    Text("⭐ ${comment.score}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+            AnimatedVisibility(visible = isExpanded) {
+                Column(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
+                    if (isLoading) {
+                        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            repeat(3) {
+                                Box(modifier = Modifier.fillMaxWidth().height(60.dp).clip(RoundedCornerShape(12.dp)).shimmerEffect())
+                            }
+                        }
+                    } else if (comments.isNullOrEmpty()) {
+                        Text(strings.noComments, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp), fontSize = 13.sp)
+                    } else {
+                        comments!!.forEach { comment ->
+                            Card(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text(comment.creator_name ?: "Unknown", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+                                        Text("⭐ ${comment.score}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(comment.body ?: "", color = MaterialTheme.colorScheme.onBackground, fontSize = 13.sp)
                                 }
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(comment.body ?: "", color = MaterialTheme.colorScheme.onBackground, fontSize = 13.sp)
                             }
                         }
                     }
@@ -2201,19 +2525,27 @@ fun ZoomableImage(imageUrl: String, imageLoader: ImageLoader, onClose: () -> Uni
     }
 }
 
-@kotlin.OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TagSection(title: String, tags: List<String>, color: Color, onTagClick: (String) -> Unit) {
     if (tags.isNotEmpty()) {
-        Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onBackground)
-        FlowRow(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            tags.forEach { tag ->
-                Box(modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(color.copy(alpha = 0.15f)).clickable { onTagClick(tag) }.padding(horizontal = 8.dp, vertical = 4.dp)) {
-                    Text(tag, color = color, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.1f))
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(title, style = MaterialTheme.typography.labelLarge, color = color, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(12.dp))
+                FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    tags.forEach { tag ->
+                        Box(modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(color.copy(alpha = 0.2f)).clickable { onTagClick(tag) }.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                            Text(tag, color = color, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                 }
             }
         }
-        Spacer(modifier = Modifier.height(12.dp))
     }
 }
 
@@ -2247,6 +2579,53 @@ fun VideoPlayer(exoPlayer: ExoPlayer) {
     )
 }
 
+private fun saveFileToStorage(context: Context, sourceFile: File, fileName: String, treeUriStr: String) {
+    if (treeUriStr.isEmpty()) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val ext = sourceFile.extension
+            val mimeType = if (ext.equals("webm", true) || ext.equals("mp4", true)) "video/$ext" else "image/$ext"
+            val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_PICTURES + "/HIDEOUT")
+            }
+            val table = if (mimeType.startsWith("video")) android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI else android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            val uri = context.contentResolver.insert(table, contentValues)
+            if (uri != null) {
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    sourceFile.inputStream().use { it.copyTo(out) }
+                }
+            } else {
+                throw Exception("Failed to save to MediaStore")
+            }
+        } else {
+            val targetDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES)
+            val hideoutDir = File(targetDir, "HIDEOUT")
+            if (!hideoutDir.exists()) hideoutDir.mkdirs()
+            val nomediaFile = File(hideoutDir, ".nomedia")
+            if (!nomediaFile.exists()) nomediaFile.createNewFile()
+
+            val destFile = File(hideoutDir, fileName)
+            sourceFile.copyTo(destFile, overwrite = true)
+            val scanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
+            scanIntent.data = Uri.fromFile(destFile)
+            context.sendBroadcast(scanIntent)
+        }
+    } else {
+        val treeUri = Uri.parse(treeUriStr)
+        val documentId = android.provider.DocumentsContract.getTreeDocumentId(treeUri)
+        val docUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
+        val newDocUri = android.provider.DocumentsContract.createDocument(context.contentResolver, docUri, "*/*", fileName)
+        if (newDocUri != null) {
+            context.contentResolver.openOutputStream(newDocUri)?.use { out ->
+                sourceFile.inputStream().use { it.copyTo(out) }
+            }
+        } else {
+            throw Exception("Failed to save to selected folder")
+        }
+    }
+}
+
 fun downloadMediaWithRange(
     context: Context,
     url: String,
@@ -2262,29 +2641,7 @@ fun downloadMediaWithRange(
         if (cached != null) {
             CoroutineScope(Dispatchers.IO).launch {
                 try {
-                    if (treeUriStr.isEmpty()) {
-                        val targetDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
-                        val hideoutDir = File(targetDir, "HIDEOUT")
-                        if (!hideoutDir.exists()) hideoutDir.mkdirs()
-                        val nomediaFile = File(hideoutDir, ".nomedia")
-                        if (!nomediaFile.exists()) nomediaFile.createNewFile()
-
-                        val destFile = File(hideoutDir, fileName)
-                        cached.copyTo(destFile, overwrite = true)
-                        val scanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
-                        scanIntent.data = Uri.fromFile(destFile)
-                        context.sendBroadcast(scanIntent)
-                    } else {
-                        val treeUri = Uri.parse(treeUriStr)
-                        val documentId = android.provider.DocumentsContract.getTreeDocumentId(treeUri)
-                        val docUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
-                        val newDocUri = android.provider.DocumentsContract.createDocument(context.contentResolver, docUri, "*/*", fileName)
-                        if (newDocUri != null) {
-                            context.contentResolver.openOutputStream(newDocUri)?.use { out ->
-                                cached.inputStream().use { it.copyTo(out) }
-                            }
-                        }
-                    }
+                    saveFileToStorage(context, cached, fileName, treeUriStr)
                     withContext(Dispatchers.Main) { Toast.makeText(context, strings.downloadComplete, Toast.LENGTH_SHORT).show() }
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) { Toast.makeText(context, strings.downloadFailed(e.localizedMessage ?: ""), Toast.LENGTH_SHORT).show() }
@@ -2301,53 +2658,31 @@ fun downloadMediaWithRange(
             val tempFile = File(context.cacheDir, "temp_$fileName")
             var downloadedBytes = if (tempFile.exists()) tempFile.length() else 0L
 
-            val connection = URL(url).openConnection() as HttpURLConnection
-            connection.setRequestProperty("User-Agent", NetworkModule.DEFAULT_USER_AGENT)
-            if (cfClearanceCookie.isNotBlank() && cfClearanceCookie != "bypass") {
-                connection.setRequestProperty("Cookie", cfClearanceCookie)
-            }
+            val requestBuilder = okhttp3.Request.Builder().url(url)
             if (downloadedBytes > 0) {
-                connection.setRequestProperty("Range", "bytes=$downloadedBytes-")
+                requestBuilder.addHeader("Range", "bytes=$downloadedBytes-")
             }
-            connection.connect()
 
-            val responseCode = connection.responseCode
-            val inputStream = if (responseCode == HttpURLConnection.HTTP_PARTIAL) {
-                connection.inputStream
-            } else {
+            val response = NetworkModule.client.newCall(requestBuilder.build()).execute()
+
+            if (!response.isSuccessful) throw Exception("HTTP ${response.code}")
+
+            val isPartial = response.code == 206
+            if (!isPartial && downloadedBytes > 0) {
                 downloadedBytes = 0L
                 tempFile.delete()
-                connection.inputStream
             }
 
+            val inputStream = response.body?.byteStream() ?: throw Exception("Empty response body")
             val outputStream = FileOutputStream(tempFile, downloadedBytes > 0)
-            inputStream.copyTo(outputStream)
-            inputStream.close()
-            outputStream.close()
 
-            if (treeUriStr.isEmpty()) {
-                val targetDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
-                val hideoutDir = File(targetDir, "HIDEOUT")
-                if (!hideoutDir.exists()) hideoutDir.mkdirs()
-                val nomediaFile = File(hideoutDir, ".nomedia")
-                if (!nomediaFile.exists()) nomediaFile.createNewFile()
-
-                val destFile = File(hideoutDir, fileName)
-                tempFile.copyTo(destFile, overwrite = true)
-                val scanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
-                scanIntent.data = Uri.fromFile(destFile)
-                context.sendBroadcast(scanIntent)
-            } else {
-                val treeUri = Uri.parse(treeUriStr)
-                val documentId = android.provider.DocumentsContract.getTreeDocumentId(treeUri)
-                val docUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
-                val newDocUri = android.provider.DocumentsContract.createDocument(context.contentResolver, docUri, "*/*", fileName)
-                if (newDocUri != null) {
-                    context.contentResolver.openOutputStream(newDocUri)?.use { out ->
-                        tempFile.inputStream().use { it.copyTo(out) }
-                    }
+            inputStream.use { input ->
+                outputStream.use { output ->
+                    input.copyTo(output)
                 }
             }
+
+            saveFileToStorage(context, tempFile, fileName, treeUriStr)
 
             if (!md5.isNullOrBlank()) {
                 val cacheDir = File(context.cacheDir, "e621_media_cache")
