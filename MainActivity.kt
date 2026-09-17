@@ -106,10 +106,13 @@ import androidx.datastore.preferences.preferencesDataStore
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.paging.LoadState
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
+import androidx.paging.cachedIn
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.filter
@@ -194,6 +197,7 @@ interface AppStrings {
     val tagInputHint: String
     val appSettings: String
     val useDarkTheme: String
+    val autoPlayVideo: String
     val downloadLocation: String
     val defaultFolder: String
     val customFolder: String
@@ -275,6 +279,7 @@ interface AppStrings {
     val commentsTitle: String
     val noComments: String
     fun viewPool(poolId: Int): String
+    val unsupportedSwf: String
 }
 
 object KoStrings : AppStrings {
@@ -306,6 +311,7 @@ object KoStrings : AppStrings {
     override val tagInputHint = "태그 입력 (예: gore)"
     override val appSettings = "앱 설정"
     override val useDarkTheme = "다크 테마 사용"
+    override val autoPlayVideo = "비디오 포스트 자동재생"
     override val downloadLocation = "다운로드 저장 위치 (터치하여 탐색기에서 변경)"
     override val defaultFolder = "📁 기본 폴더 (Pictures/HIDEOUT)"
     override val customFolder = "📁 사용자 지정 폴더"
@@ -387,6 +393,7 @@ object KoStrings : AppStrings {
     override val commentsTitle = "💬 댓글"
     override val noComments = "등록된 댓글이 없습니다."
     override fun viewPool(poolId: Int) = "📚 풀 (Pool #$poolId)"
+    override val unsupportedSwf = "SWF 파일은 지원하지 않습니다."
 }
 
 object EnStrings : AppStrings {
@@ -418,6 +425,7 @@ object EnStrings : AppStrings {
     override val tagInputHint = "Enter tag (e.g., gore)"
     override val appSettings = "App Settings"
     override val useDarkTheme = "Use Dark Theme"
+    override val autoPlayVideo = "Auto-play video posts"
     override val downloadLocation = "Download Location (Tap to change)"
     override val defaultFolder = "📁 Default Folder (Pictures/HIDEOUT)"
     override val customFolder = "📁 Custom Folder"
@@ -499,9 +507,17 @@ object EnStrings : AppStrings {
     override val commentsTitle = "💬 Comments"
     override val noComments = "No comments yet."
     override fun viewPool(poolId: Int) = "📚 View Pool #$poolId"
+    override val unsupportedSwf = "SWF files are not supported."
 }
 
 val LocalStrings = staticCompositionLocalOf<AppStrings> { KoStrings }
+
+data class NavEntry(
+    val query: String,
+    val scrollIdx: Int = 0,
+    val scrollOff: Int = 0,
+    val detailIdx: Int? = null
+)
 
 val Context.dataStore by preferencesDataStore(name = "hideout_datastore")
 
@@ -612,6 +628,7 @@ class AppPreferences(private val context: Context) {
     companion object {
         val KEY_DARK_THEME = booleanPreferencesKey("is_dark_theme")
         val KEY_APP_LANGUAGE = stringPreferencesKey("app_language")
+        val KEY_AUTO_PLAY = booleanPreferencesKey("auto_play_video")
         val KEY_NSFW_ENABLED = booleanPreferencesKey("is_nsfw_enabled")
         val KEY_DOWNLOAD_TREE_URI = stringPreferencesKey("download_tree_uri")
         val KEY_BLACKLIST = stringSetPreferencesKey("blacklisted_tags")
@@ -628,6 +645,7 @@ class AppPreferences(private val context: Context) {
 
     val isDarkTheme: Flow<Boolean> = context.dataStore.data.map { it[KEY_DARK_THEME] ?: true }
     val appLanguage: Flow<String> = context.dataStore.data.map { it[KEY_APP_LANGUAGE] ?: "ko" }
+    val isAutoPlay: Flow<Boolean> = context.dataStore.data.map { it[KEY_AUTO_PLAY] ?: true }
     val isNsfwEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_NSFW_ENABLED] ?: false }
     val downloadTreeUri: Flow<String> = context.dataStore.data.map { it[KEY_DOWNLOAD_TREE_URI] ?: "" }
     val blacklistedTags: Flow<Set<String>> = context.dataStore.data.map { it[KEY_BLACKLIST] ?: emptySet() }
@@ -643,6 +661,7 @@ class AppPreferences(private val context: Context) {
 
     suspend fun setDarkTheme(value: Boolean) = context.dataStore.edit { it[KEY_DARK_THEME] = value }
     suspend fun setAppLanguage(value: String) = context.dataStore.edit { it[KEY_APP_LANGUAGE] = value }
+    suspend fun setAutoPlay(value: Boolean) = context.dataStore.edit { it[KEY_AUTO_PLAY] = value }
     suspend fun setNsfwEnabled(value: Boolean) = context.dataStore.edit { it[KEY_NSFW_ENABLED] = value }
     suspend fun setDownloadTreeUri(value: String) = context.dataStore.edit { it[KEY_DOWNLOAD_TREE_URI] = value }
     suspend fun setBlacklist(value: Set<String>) = context.dataStore.edit { it[KEY_BLACKLIST] = value }
@@ -829,6 +848,20 @@ fun formatByteSize(bytes: Long): String {
     }
 }
 
+@Composable
+fun imageRequest(context: Context, imageUrl: Any, cookie: String = ""): ImageRequest {
+    return remember(imageUrl, cookie) {
+        ImageRequest.Builder(context)
+            .data(imageUrl)
+            .addHeader("User-Agent", NetworkModule.DEFAULT_USER_AGENT)
+            .apply {
+                if (cookie.isNotBlank()) addHeader("Cookie", cookie)
+            }
+            .crossfade(200)
+            .build()
+    }
+}
+
 class MainActivity : ComponentActivity() {
 
     @OptIn(DelicateCoroutinesApi::class)
@@ -888,6 +921,7 @@ fun MainApp(
     val savedStackStr by appPrefs.searchStack.collectAsState(initial = "")
     val isVpnBypassedPref by appPrefs.isVpnBypassed.collectAsState(initial = false)
     val savedVpnConfigText by appPrefs.vpnConfigText.collectAsState(initial = "")
+    val isAutoPlay by appPrefs.isAutoPlay.collectAsState(initial = true)
 
     var isVpnBypassed by remember { mutableStateOf(false) }
     LaunchedEffect(isVpnBypassedPref) { isVpnBypassed = isVpnBypassedPref }
@@ -977,51 +1011,131 @@ fun MainApp(
         }
     }
 
-    var searchStack by remember { mutableStateOf(listOf("")) }
+    var navStack by remember { mutableStateOf(listOf(NavEntry(""))) }
+    var isStackLoaded by remember { mutableStateOf(false) }
+
     LaunchedEffect(savedStackStr) {
-        if (savedStackStr.isNotEmpty()) {
-            searchStack = savedStackStr.split("||")
+        if (!isStackLoaded && savedStackStr.isNotEmpty()) {
+            try {
+                val parsed = Gson().fromJson(savedStackStr, Array<NavEntry>::class.java).toList()
+                if (parsed.isNotEmpty()) navStack = parsed
+            } catch (e: Exception) {
+                val split = savedStackStr.split("||")
+                if (split.isNotEmpty()) {
+                    navStack = split.map { NavEntry(query = it) }
+                }
+            }
+            isStackLoaded = true
+        } else if (!isStackLoaded) {
+            isStackLoaded = true
         }
     }
 
+    val currentEntry = navStack.lastOrNull() ?: NavEntry("")
+    val currentTag = currentEntry.query
+    val selectedPostIndex = currentEntry.detailIdx
+
     var searchInput by remember { mutableStateOf("") }
-    val currentTag = searchStack.lastOrNull() ?: ""
+    LaunchedEffect(currentTag) {
+        searchInput = if (currentTag == "#HOT#") "" else currentTag
+    }
 
     val blacklistedList = remember(blacklistedTagsSet) { blacklistedTagsSet.toList() }
 
-    val pager = remember(currentTag, isNsfwEnabled, blacklistedList) {
-        Pager(
-            config = PagingConfig(pageSize = 20, enablePlaceholders = false),
-            pagingSourceFactory = {
-                E621PagingSource(
-                    query = currentTag,
-                    isNsfwEnabled = isNsfwEnabled,
-                    blacklistedTags = blacklistedList,
-                    onAuthError = {
-                        scope.launch {
-                            appPrefs.setCredentials("", "")
-                            Toast.makeText(context, strings.loginFailed, Toast.LENGTH_LONG).show()
-                        }
-                    },
-                    onCloudflareBlocked = {
-                        scope.launch(Dispatchers.Main) { showCaptchaDialog = true }
-                    }
-                )
-            }
-        )
-    }
-
-    val lazyPagingItems: LazyPagingItems<Post> = remember(pager) {
-        pager.flow.map { pagingData ->
-            val seen = Collections.newSetFromMap(ConcurrentHashMap<Int, Boolean>())
-            pagingData.filter { post ->
-                seen.add(post.id)
+    val pagerCache = remember {
+        object : java.util.LinkedHashMap<String, Flow<androidx.paging.PagingData<Post>>>(5, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Flow<androidx.paging.PagingData<Post>>>?): Boolean {
+                return size > 5
             }
         }
-    }.collectAsLazyPagingItems()
+    }
 
-    val gridState = rememberLazyStaggeredGridState()
-    var selectedPostIndex by remember { mutableStateOf<Int?>(null) }
+    val gridStateCache = remember {
+        object : java.util.LinkedHashMap<String, LazyStaggeredGridState>(5, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, LazyStaggeredGridState>?): Boolean {
+                return size > 5
+            }
+        }
+    }
+
+    val listCacheKey = "${currentTag}_${isNsfwEnabled}_${blacklistedList.hashCode()}"
+
+    val deduplicatedFlow = remember(listCacheKey) {
+        pagerCache.getOrPut(listCacheKey) {
+            Pager(
+                config = PagingConfig(pageSize = 20, enablePlaceholders = false),
+                pagingSourceFactory = {
+                    E621PagingSource(
+                        query = currentTag,
+                        isNsfwEnabled = isNsfwEnabled,
+                        blacklistedTags = blacklistedList,
+                        onAuthError = {
+                            scope.launch {
+                                appPrefs.setCredentials("", "")
+                                Toast.makeText(context, strings.loginFailed, Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        onCloudflareBlocked = {
+                            scope.launch(Dispatchers.Main) { showCaptchaDialog = true }
+                        }
+                    )
+                }
+            ).flow.map { pagingData ->
+                val seen = Collections.newSetFromMap(ConcurrentHashMap<Int, Boolean>())
+                pagingData.filter { post -> seen.add(post.id) }
+            }.cachedIn(scope)
+        }
+    }
+
+    val lazyPagingItems = deduplicatedFlow.collectAsLazyPagingItems()
+
+    val gridState = remember(listCacheKey) {
+        gridStateCache.getOrPut(listCacheKey) { LazyStaggeredGridState() }
+    }
+
+    val gifEnabledLoader = remember {
+        ImageLoader.Builder(context)
+            .okHttpClient(NetworkModule.client)
+            .components {
+                if (SDK_INT >= 28) add(ImageDecoderDecoder.Factory()) else add(GifDecoder.Factory())
+            }
+            .build()
+    }
+
+    LaunchedEffect(currentEntry) {
+        if (currentEntry.detailIdx == null) {
+            if (gridState.firstVisibleItemIndex != currentEntry.scrollIdx || gridState.firstVisibleItemScrollOffset != currentEntry.scrollOff) {
+                gridState.scrollToItem(currentEntry.scrollIdx, currentEntry.scrollOff)
+            }
+        }
+    }
+
+    fun pushTag(newTag: String) {
+        val top = navStack.last().copy(
+            scrollIdx = gridState.firstVisibleItemIndex,
+            scrollOff = gridState.firstVisibleItemScrollOffset,
+            detailIdx = selectedPostIndex
+        )
+        val newStack = navStack.dropLast(1) + top + NavEntry(query = newTag)
+        navStack = newStack
+        scope.launch { appPrefs.setSearchStack(Gson().toJson(newStack)) }
+    }
+
+    fun popStack() {
+        if (navStack.size > 1) {
+            val popped = navStack.dropLast(1)
+            navStack = popped
+            scope.launch { appPrefs.setSearchStack(Gson().toJson(popped)) }
+        }
+    }
+
+    fun closeDetail() {
+        val currentIdx = selectedPostIndex ?: 0
+        val top = navStack.last().copy(detailIdx = null, scrollIdx = currentIdx, scrollOff = 0)
+        val newStack = navStack.dropLast(1) + top
+        navStack = newStack
+        scope.launch { appPrefs.setSearchStack(Gson().toJson(newStack)) }
+    }
 
     if (updateRelease != null) {
         AlertDialog(
@@ -1059,18 +1173,15 @@ fun MainApp(
         )
     }
 
-    BackHandler(enabled = selectedPostIndex == null && searchStack.size > 1) {
-        val newStack = searchStack.dropLast(1)
-        searchStack = newStack
-        scope.launch { appPrefs.setSearchStack(newStack.joinToString("||")) }
-        val prevTag = newStack.last()
-        searchInput = if (prevTag == "#HOT#") "" else prevTag
-        scope.launch { gridState.scrollToItem(0) }
+    BackHandler(enabled = isStackLoaded && (navStack.size > 1 || currentEntry.detailIdx != null)) {
+        if (currentEntry.detailIdx != null) {
+            closeDetail()
+        } else {
+            popStack()
+        }
     }
 
-    if (selectedPostIndex != null) BackHandler { selectedPostIndex = null }
-
-    BackHandler(enabled = selectedPostIndex == null && searchStack.size <= 1) {
+    BackHandler(enabled = isStackLoaded && setupMode == null && selectedPostIndex == null && navStack.size <= 1) {
         Thread { VpnManager.stopVpnSync(context) }.start()
         activity?.finishAffinity()
     }
@@ -1217,24 +1328,30 @@ fun MainApp(
                 }
             }
         }
-    } else {
+    } else if (isStackLoaded) {
         if (selectedPostIndex != null) {
             DetailPagerScreen(
                 lazyPagingItems = lazyPagingItems,
-                initialIndex = selectedPostIndex!!,
+                initialIndex = selectedPostIndex,
                 appPrefs = appPrefs,
                 isDarkTheme = isDarkTheme,
-                onClose = { selectedPostIndex = null },
-                onTagClick = { clickedTag ->
-                    selectedPostIndex = null
-                    searchInput = clickedTag
-                    if (searchStack.lastOrNull() != clickedTag) {
-                        val next = searchStack + clickedTag
-                        searchStack = next
-                        scope.launch {
-                            appPrefs.setSearchStack(next.joinToString("||"))
-                            gridState.scrollToItem(0)
-                        }
+                isAutoPlay = isAutoPlay,
+                gifEnabledLoader = gifEnabledLoader,
+                cfClearanceCookie = cfClearanceCookie,
+                onClose = {
+                    if (navStack.size > 1 && currentEntry.detailIdx == null) {
+                        popStack()
+                    } else {
+                        closeDetail()
+                    }
+                },
+                onTagClick = { clickedTag -> pushTag(clickedTag) },
+                onPageChanged = { newIdx ->
+                    if (currentEntry.detailIdx != newIdx) {
+                        val top = navStack.last().copy(detailIdx = newIdx)
+                        val newStack = navStack.dropLast(1) + top
+                        navStack = newStack
+                        scope.launch { appPrefs.setSearchStack(Gson().toJson(newStack)) }
                     }
                 }
             )
@@ -1244,17 +1361,10 @@ fun MainApp(
                 searchInput = searchInput,
                 currentAppliedTag = currentTag,
                 gridState = gridState,
+                gifEnabledLoader = gifEnabledLoader,
+                cfClearanceCookie = cfClearanceCookie,
                 onSearchInputChange = { searchInput = it },
-                onSearch = {
-                    if (searchInput != searchStack.lastOrNull()) {
-                        val next = searchStack + searchInput
-                        searchStack = next
-                        scope.launch {
-                            appPrefs.setSearchStack(next.joinToString("||"))
-                            gridState.scrollToItem(0)
-                        }
-                    }
-                },
+                onSearch = { if (searchInput != currentTag) pushTag(searchInput) },
                 isVpnActive = (vpnState == Tunnel.State.UP),
                 onVpnActionClick = {
                     if (vpnState == Tunnel.State.UP) {
@@ -1264,41 +1374,36 @@ fun MainApp(
                         scope.launch { appPrefs.setVpnBypassed(false) }
                     }
                 },
-                onPostClick = { index -> selectedPostIndex = index },
+                onPostClick = { index ->
+                    val top = navStack.last().copy(
+                        scrollIdx = gridState.firstVisibleItemIndex,
+                        scrollOff = gridState.firstVisibleItemScrollOffset,
+                        detailIdx = index
+                    )
+                    val newStack = navStack.dropLast(1) + top
+                    navStack = newStack
+                    scope.launch { appPrefs.setSearchStack(Gson().toJson(newStack)) }
+                },
                 isDarkTheme = isDarkTheme,
                 onThemeToggle = { scope.launch { appPrefs.setDarkTheme(!isDarkTheme) } },
                 isNsfwEnabled = isNsfwEnabled,
                 onNsfwToggle = { scope.launch { appPrefs.setNsfwEnabled(!isNsfwEnabled) } },
+                isAutoPlay = isAutoPlay,
+                onAutoPlayToggle = { scope.launch { appPrefs.setAutoPlay(!isAutoPlay) } },
                 loginUsername = loginUsername,
                 loginApiKey = loginApiKey,
                 onLoginSave = { user, key -> scope.launch { appPrefs.setCredentials(user, key) } },
                 onFavoritesClick = {
                     if (loginUsername.isNotBlank()) {
                         val favTag = "fav:$loginUsername"
-                        searchInput = favTag
-                        if (searchStack.lastOrNull() != favTag) {
-                            val next = searchStack + favTag
-                            searchStack = next
-                            scope.launch {
-                                appPrefs.setSearchStack(next.joinToString("||"))
-                                gridState.scrollToItem(0)
-                            }
-                        }
+                        if (currentTag != favTag) pushTag(favTag)
                     } else {
                         Toast.makeText(context, strings.loginFirst, Toast.LENGTH_SHORT).show()
                     }
                 },
                 onHotPostsClick = {
-                    searchInput = ""
                     val hotTag = "#HOT#"
-                    if (searchStack.lastOrNull() != hotTag) {
-                        val next = searchStack + hotTag
-                        searchStack = next
-                        scope.launch {
-                            appPrefs.setSearchStack(next.joinToString("||"))
-                            gridState.scrollToItem(0)
-                        }
-                    }
+                    if (currentTag != hotTag) pushTag(hotTag)
                 },
                 blacklistedTags = blacklistedList,
                 onBlacklistSave = { newList -> scope.launch { appPrefs.setBlacklist(newList.toSet()) } },
@@ -1393,10 +1498,13 @@ fun GalleryScreen(
     lazyPagingItems: LazyPagingItems<Post>,
     searchInput: String, currentAppliedTag: String,
     gridState: LazyStaggeredGridState,
+    gifEnabledLoader: ImageLoader,
+    cfClearanceCookie: String,
     onSearchInputChange: (String) -> Unit, onSearch: () -> Unit,
     isVpnActive: Boolean, onVpnActionClick: () -> Unit, onPostClick: (Int) -> Unit,
     isDarkTheme: Boolean, onThemeToggle: () -> Unit,
     isNsfwEnabled: Boolean, onNsfwToggle: () -> Unit,
+    isAutoPlay: Boolean, onAutoPlayToggle: () -> Unit,
     loginUsername: String, loginApiKey: String, onLoginSave: (String, String) -> Unit,
     onFavoritesClick: () -> Unit, onHotPostsClick: () -> Unit,
     blacklistedTags: List<String>, onBlacklistSave: (List<String>) -> Unit,
@@ -1496,155 +1604,165 @@ fun GalleryScreen(
     }
 
     if (showLoginDialog) {
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         var tempUser by remember { mutableStateOf(loginUsername) }
         var tempKey by remember { mutableStateOf(loginApiKey) }
 
-        ModalBottomSheet(
-            onDismissRequest = { showLoginDialog = false },
-            sheetState = sheetState,
-            containerColor = MaterialTheme.colorScheme.surface
-        ) {
-            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp)) {
-                Text(strings.accountLogin, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(strings.apiKeyInfo, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(modifier = Modifier.height(24.dp))
-                OutlinedTextField(value = tempUser, onValueChange = { tempUser = it }, label = { Text(strings.usernameHint) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(value = tempKey, onValueChange = { tempKey = it }, label = { Text(strings.apiKeyHint) }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-                Spacer(modifier = Modifier.height(32.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    if (loginUsername.isNotBlank()) {
-                        TextButton(onClick = { onLoginSave("", ""); showLoginDialog = false }, modifier = Modifier.padding(end = 8.dp)) { Text(strings.logout, color = Color.Red) }
+        Dialog(onDismissRequest = { showLoginDialog = false }) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(24.dp)) {
+                    Text(strings.accountLogin, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(strings.apiKeyInfo, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(24.dp))
+                    OutlinedTextField(value = tempUser, onValueChange = { tempUser = it }, label = { Text(strings.usernameHint) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(value = tempKey, onValueChange = { tempKey = it }, label = { Text(strings.apiKeyHint) }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+                    Spacer(modifier = Modifier.height(32.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        if (loginUsername.isNotBlank()) {
+                            TextButton(onClick = { onLoginSave("", ""); showLoginDialog = false }, modifier = Modifier.padding(end = 8.dp)) { Text(strings.logout, color = Color.Red) }
+                        }
+                        TextButton(onClick = { showLoginDialog = false }, modifier = Modifier.padding(end = 8.dp)) { Text(strings.cancel, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        Button(onClick = { onLoginSave(tempUser, tempKey); showLoginDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) { Text(strings.save, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold) }
                     }
-                    TextButton(onClick = { showLoginDialog = false }, modifier = Modifier.padding(end = 8.dp)) { Text(strings.cancel, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    Button(onClick = { onLoginSave(tempUser, tempKey); showLoginDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) { Text(strings.save, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold) }
                 }
-                Spacer(modifier = Modifier.height(WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()))
             }
         }
     }
 
     if (showBlacklistDialog) {
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         var newTag by remember { mutableStateOf("") }
         var currentList by remember { mutableStateOf(blacklistedTags) }
 
-        ModalBottomSheet(
-            onDismissRequest = { showBlacklistDialog = false },
-            sheetState = sheetState,
-            containerColor = MaterialTheme.colorScheme.surface
-        ) {
-            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp)) {
-                Text(strings.blacklistManagement, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(strings.blacklistInfo, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(modifier = Modifier.height(24.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(value = newTag, onValueChange = { newTag = it }, modifier = Modifier.weight(1f), label = { Text(strings.tagInputHint) }, singleLine = true)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    IconButton(onClick = {
-                        if (newTag.isNotBlank() && !currentList.contains(newTag.trim())) { currentList = currentList + newTag.trim(); newTag = "" }
-                    }, modifier = Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha=0.15f), RoundedCornerShape(12.dp))) {
-                        Icon(Icons.Default.Add, contentDescription = strings.cdAdd, tint = MaterialTheme.colorScheme.primary)
-                    }
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-                LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
-                    items(currentList) { tag ->
-                        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text(tag, color = MaterialTheme.colorScheme.onBackground)
-                            IconButton(onClick = { currentList = currentList - tag }) { Icon(Icons.Default.Delete, contentDescription = strings.cdDelete, tint = Color.Red) }
+        Dialog(onDismissRequest = { showBlacklistDialog = false }) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(24.dp)) {
+                    Text(strings.blacklistManagement, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(strings.blacklistInfo, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(value = newTag, onValueChange = { newTag = it }, modifier = Modifier.weight(1f), label = { Text(strings.tagInputHint) }, singleLine = true)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        IconButton(onClick = {
+                            if (newTag.isNotBlank() && !currentList.contains(newTag.trim())) { currentList = currentList + newTag.trim(); newTag = "" }
+                        }, modifier = Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha=0.15f), RoundedCornerShape(12.dp))) {
+                            Icon(Icons.Default.Add, contentDescription = strings.cdAdd, tint = MaterialTheme.colorScheme.primary)
                         }
                     }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
+                        items(currentList) { tag ->
+                            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Text(tag, color = MaterialTheme.colorScheme.onBackground)
+                                IconButton(onClick = { currentList = currentList - tag }) { Icon(Icons.Default.Delete, contentDescription = strings.cdDelete, tint = Color.Red) }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { showBlacklistDialog = false }, modifier = Modifier.padding(end = 8.dp)) { Text(strings.cancel, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        Button(onClick = { onBlacklistSave(currentList); showBlacklistDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) { Text(strings.save, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold) }
+                    }
                 }
-                Spacer(modifier = Modifier.height(16.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = { showBlacklistDialog = false }, modifier = Modifier.padding(end = 8.dp)) { Text(strings.cancel, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    Button(onClick = { onBlacklistSave(currentList); showBlacklistDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) { Text(strings.save, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold) }
-                }
-                Spacer(modifier = Modifier.height(WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()))
             }
         }
     }
 
     if (showSettingsDialog) {
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         var currentCacheSize by remember(showSettingsDialog) { mutableStateOf(getCacheSizeString(context)) }
 
-        ModalBottomSheet(
-            onDismissRequest = { showSettingsDialog = false },
-            sheetState = sheetState,
-            containerColor = MaterialTheme.colorScheme.surface
-        ) {
-            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp).verticalScroll(rememberScrollState())) {
-                Text(strings.appSettings, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(24.dp))
+        Dialog(onDismissRequest = { showSettingsDialog = false }) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(24.dp).verticalScroll(rememberScrollState())) {
+                    Text(strings.appSettings, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(24.dp))
 
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onThemeToggle() }.padding(vertical = 8.dp)) {
-                    Text(strings.useDarkTheme, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
-                    Switch(checked = isDarkTheme, onCheckedChange = { onThemeToggle() }, colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary, checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)))
-                }
-
-                Spacer(Modifier.height(16.dp))
-                Text(strings.appLanguageLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                    Card(modifier = Modifier.weight(1f).clickable { onLanguageChange("ko") }, shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = if (appLanguage == "ko") MaterialTheme.colorScheme.primary.copy(alpha=0.1f) else MaterialTheme.colorScheme.surfaceVariant)) {
-                        Text(strings.languageKo, textAlign = TextAlign.Center, fontWeight = if (appLanguage == "ko") FontWeight.Bold else FontWeight.Normal, color = if (appLanguage == "ko") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(16.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onThemeToggle() }.padding(vertical = 8.dp)) {
+                        Text(strings.useDarkTheme, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                        Switch(checked = isDarkTheme, onCheckedChange = { onThemeToggle() }, colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary, checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)))
                     }
-                    Spacer(Modifier.width(12.dp))
-                    Card(modifier = Modifier.weight(1f).clickable { onLanguageChange("en") }, shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = if (appLanguage == "en") MaterialTheme.colorScheme.primary.copy(alpha=0.1f) else MaterialTheme.colorScheme.surfaceVariant)) {
-                        Text(strings.languageEn, textAlign = TextAlign.Center, fontWeight = if (appLanguage == "en") FontWeight.Bold else FontWeight.Normal, color = if (appLanguage == "en") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(16.dp))
+
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onAutoPlayToggle() }.padding(vertical = 8.dp)) {
+                        Text(strings.autoPlayVideo, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                        Switch(checked = isAutoPlay, onCheckedChange = { onAutoPlayToggle() }, colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary, checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)))
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+                    Text(strings.appLanguageLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                        Card(modifier = Modifier.weight(1f).clickable { onLanguageChange("ko") }, shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = if (appLanguage == "ko") MaterialTheme.colorScheme.primary.copy(alpha=0.1f) else MaterialTheme.colorScheme.surfaceVariant)) {
+                            Text(strings.languageKo, textAlign = TextAlign.Center, fontWeight = if (appLanguage == "ko") FontWeight.Bold else FontWeight.Normal, color = if (appLanguage == "ko") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(16.dp))
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Card(modifier = Modifier.weight(1f).clickable { onLanguageChange("en") }, shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = if (appLanguage == "en") MaterialTheme.colorScheme.primary.copy(alpha=0.1f) else MaterialTheme.colorScheme.surfaceVariant)) {
+                            Text(strings.languageEn, textAlign = TextAlign.Center, fontWeight = if (appLanguage == "en") FontWeight.Bold else FontWeight.Normal, color = if (appLanguage == "en") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(16.dp))
+                        }
+                    }
+
+                    Spacer(Modifier.height(24.dp))
+                    Text(strings.downloadLocation, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Box(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                        OutlinedButton(onClick = { dirPickerLauncher.launch(null) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
+                            Text(if (savedTreeUri.isEmpty()) strings.defaultFolder else strings.customFolder, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(vertical = 4.dp))
+                        }
+                    }
+
+                    Spacer(Modifier.height(24.dp))
+                    Text(strings.cacheManagement, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("${strings.cacheSizeLabel}$currentCacheSize", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                        Button(onClick = {
+                            context.cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                            currentCacheSize = getCacheSizeString(context)
+                            Toast.makeText(context, strings.cacheCleared, Toast.LENGTH_SHORT).show()
+                        }, colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha=0.15f)), shape = RoundedCornerShape(12.dp)) {
+                            Text(strings.clearCache, color = Color.Red, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(Modifier.height(24.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                    Spacer(Modifier.height(8.dp))
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        OutlinedButton(onClick = { exportLauncher.launch("hideout_settings_backup.json") }, modifier = Modifier.weight(1f).padding(end = 6.dp), shape = RoundedCornerShape(12.dp)) {
+                            Text(strings.exportSettings, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 4.dp))
+                        }
+                        OutlinedButton(onClick = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, modifier = Modifier.weight(1f).padding(start = 6.dp), shape = RoundedCornerShape(12.dp)) {
+                            Text(strings.importSettings, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 4.dp))
+                        }
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+                    OutlinedButton(
+                        onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Canned-F0xy"))) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Icon(Icons.Default.OpenInNew, contentDescription = strings.cdOpenBrowser, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(strings.devGithub, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(vertical = 4.dp))
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { showSettingsDialog = false }) { Text(strings.close, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
                 }
-
-                Spacer(Modifier.height(24.dp))
-                Text(strings.downloadLocation, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Box(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                    OutlinedButton(onClick = { dirPickerLauncher.launch(null) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
-                        Text(if (savedTreeUri.isEmpty()) strings.defaultFolder else strings.customFolder, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(vertical = 4.dp))
-                    }
-                }
-
-                Spacer(Modifier.height(24.dp))
-                Text(strings.cacheManagement, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("${strings.cacheSizeLabel}$currentCacheSize", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
-                    Button(onClick = {
-                        context.cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-                        currentCacheSize = getCacheSizeString(context)
-                        Toast.makeText(context, strings.cacheCleared, Toast.LENGTH_SHORT).show()
-                    }, colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha=0.15f)), shape = RoundedCornerShape(12.dp)) {
-                        Text(strings.clearCache, color = Color.Red, fontWeight = FontWeight.Bold)
-                    }
-                }
-
-                Spacer(Modifier.height(24.dp))
-                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
-                Spacer(Modifier.height(8.dp))
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    OutlinedButton(onClick = { exportLauncher.launch("hideout_settings_backup.json") }, modifier = Modifier.weight(1f).padding(end = 6.dp), shape = RoundedCornerShape(12.dp)) {
-                        Text(strings.exportSettings, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 4.dp))
-                    }
-                    OutlinedButton(onClick = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, modifier = Modifier.weight(1f).padding(start = 6.dp), shape = RoundedCornerShape(12.dp)) {
-                        Text(strings.importSettings, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 4.dp))
-                    }
-                }
-
-                Spacer(Modifier.height(16.dp))
-                OutlinedButton(
-                    onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Canned-F0xy"))) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
-                ) {
-                    Icon(Icons.Default.OpenInNew, contentDescription = strings.cdOpenBrowser, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(strings.devGithub, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(vertical = 4.dp))
-                }
-                Spacer(modifier = Modifier.height(WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()))
             }
         }
     }
@@ -1673,7 +1791,7 @@ fun GalleryScreen(
                         Image(painter = painterResource(id = R.drawable.ic_launcher2), contentDescription = strings.cdLogo, modifier = Modifier.size(64.dp).clip(RoundedCornerShape(16.dp)))
                         Spacer(modifier = Modifier.height(12.dp))
                         Text("HIDEOUT", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black, letterSpacing = 2.sp), color = MaterialTheme.colorScheme.primary)
-                        Text("Ver. 2026-09-04", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Ver. 2026-09-17", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
 
@@ -1833,7 +1951,8 @@ fun GalleryScreen(
                                         val ext = post.file?.ext ?: ""
                                         val md5 = post.file?.md5 ?: ""
                                         val cachedFile = getCachedFile(context, md5, ext)
-                                        val imageModel = cachedFile ?: post.preview?.url
+
+                                        val imageModel = cachedFile ?: post.preview?.url ?: post.sample?.url ?: post.file?.url
 
                                         Card(
                                             modifier = Modifier.fillMaxWidth().clickable { focusManager.clearFocus(force = true); keyboardController?.hide(); onPostClick(index) },
@@ -1841,10 +1960,23 @@ fun GalleryScreen(
                                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                                         ) {
                                             Box(modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp), contentAlignment = Alignment.Center) {
-                                                if (imageModel != null) {
-                                                    AsyncImage(model = imageRequest(context, imageModel), contentDescription = "${strings.idLabel(post.id)}", modifier = Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
+                                                if (ext == "swf") {
+                                                    Image(
+                                                        painter = painterResource(id = R.drawable.ic_launcher_warning),
+                                                        contentDescription = strings.unsupportedSwf,
+                                                        modifier = Modifier.fillMaxWidth().aspectRatio(1f).padding(32.dp),
+                                                        contentScale = ContentScale.Fit
+                                                    )
+                                                } else if (imageModel != null) {
+                                                    AsyncImage(
+                                                        model = imageRequest(context, imageModel, cfClearanceCookie),
+                                                        imageLoader = gifEnabledLoader,
+                                                        contentDescription = "${strings.idLabel(post.id)}",
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        contentScale = ContentScale.FillWidth
+                                                    )
                                                 } else {
-                                                    Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(48.dp))
                                                 }
 
                                                 if (LocalPostManager.isFavorited(post)) {
@@ -1986,13 +2118,6 @@ fun GalleryScreen(
     }
 }
 
-@Composable
-fun imageRequest(context: Context, imageUrl: Any): ImageRequest {
-    return remember(imageUrl) {
-        ImageRequest.Builder(context).data(imageUrl).crossfade(200).build()
-    }
-}
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DetailPagerScreen(
@@ -2000,10 +2125,18 @@ fun DetailPagerScreen(
     initialIndex: Int,
     appPrefs: AppPreferences,
     isDarkTheme: Boolean,
+    isAutoPlay: Boolean,
+    gifEnabledLoader: ImageLoader,
+    cfClearanceCookie: String,
     onClose: () -> Unit,
-    onTagClick: (String) -> Unit
+    onTagClick: (String) -> Unit,
+    onPageChanged: (Int) -> Unit
 ) {
     val pagerState = rememberPagerState(initialPage = initialIndex, pageCount = { lazyPagingItems.itemCount })
+
+    LaunchedEffect(pagerState.currentPage) {
+        onPageChanged(pagerState.currentPage)
+    }
 
     HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { pageIndex ->
         val isActive = pagerState.currentPage == pageIndex
@@ -2015,6 +2148,9 @@ fun DetailPagerScreen(
                 isActivePage = isActive,
                 appPrefs = appPrefs,
                 isDarkTheme = isDarkTheme,
+                isAutoPlay = isAutoPlay,
+                gifEnabledLoader = gifEnabledLoader,
+                cfClearanceCookie = cfClearanceCookie,
                 onClose = onClose,
                 onTagClick = onTagClick
             )
@@ -2033,6 +2169,9 @@ fun DetailScreen(
     isActivePage: Boolean,
     appPrefs: AppPreferences,
     isDarkTheme: Boolean,
+    isAutoPlay: Boolean,
+    gifEnabledLoader: ImageLoader,
+    cfClearanceCookie: String,
     onClose: () -> Unit,
     onTagClick: (String) -> Unit
 ) {
@@ -2042,7 +2181,6 @@ fun DetailScreen(
     var isFullScreen by remember { mutableStateOf(false) }
 
     val savedTreeUri by appPrefs.downloadTreeUri.collectAsState(initial = "")
-    val cfClearanceCookie by appPrefs.cfClearance.collectAsState(initial = "")
 
     val ext = post.file?.ext ?: ""
     val md5 = post.file?.md5 ?: ""
@@ -2052,28 +2190,27 @@ fun DetailScreen(
     val bigHeartScale = remember { Animatable(0f) }
     val bigHeartAlpha = remember { Animatable(0f) }
 
-    val gifEnabledLoader = remember {
-        ImageLoader.Builder(context)
-            .okHttpClient(NetworkModule.client)
-            .components {
-                if (SDK_INT >= 28) add(ImageDecoderDecoder.Factory()) else add(GifDecoder.Factory())
-            }
-            .build()
-    }
-
     var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
 
     LaunchedEffect(isActivePage) {
         if (isActivePage && (ext == "webm" || ext == "mp4")) {
             val mediaUrl = post.file?.url
             if (mediaUrl != null) {
-                val player = ExoPlayer.Builder(context).build().apply {
-                    val mediaUri = if (cachedFile != null) Uri.fromFile(cachedFile) else Uri.parse(mediaUrl)
-                    setMediaItem(MediaItem.fromUri(mediaUri))
-                    prepare()
-                    playWhenReady = true
-                    repeatMode = Player.REPEAT_MODE_ALL
-                }
+                val dataSourceFactory = DefaultHttpDataSource.Factory()
+                    .setUserAgent(NetworkModule.DEFAULT_USER_AGENT)
+                    .setDefaultRequestProperties(
+                        if (cfClearanceCookie.isNotBlank()) mapOf("Cookie" to cfClearanceCookie) else emptyMap()
+                    )
+
+                val player = ExoPlayer.Builder(context)
+                    .setMediaSourceFactory(DefaultMediaSourceFactory(context).setDataSourceFactory(dataSourceFactory))
+                    .build().apply {
+                        val mediaUri = if (cachedFile != null) Uri.fromFile(cachedFile) else Uri.parse(mediaUrl)
+                        setMediaItem(MediaItem.fromUri(mediaUri))
+                        prepare()
+                        playWhenReady = isAutoPlay
+                        repeatMode = Player.REPEAT_MODE_ALL
+                    }
                 exoPlayer = player
             }
         } else {
@@ -2130,7 +2267,7 @@ fun DetailScreen(
         }
     }
 
-    if (isFullScreen && post.file?.url != null) {
+    if (isFullScreen && post.file?.url != null && ext != "swf") {
         Dialog(onDismissRequest = { isFullScreen = false }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
             if (ext == "webm" || ext == "mp4") {
                 Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
@@ -2142,9 +2279,12 @@ fun DetailScreen(
                     }
                 }
             } else {
+                val fullUrl = post.file.url
+                val zoomUrl = if (cachedFile != null) cachedFile.absolutePath else fullUrl
                 ZoomableImage(
-                    imageUrl = if (cachedFile != null) cachedFile.absolutePath else post.file.url,
+                    imageUrl = zoomUrl,
                     imageLoader = gifEnabledLoader,
+                    cfClearanceCookie = cfClearanceCookie,
                     onClose = { isFullScreen = false }
                 )
             }
@@ -2173,7 +2313,67 @@ fun DetailScreen(
         Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
             Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
                 Box(modifier = Modifier.fillMaxWidth().heightIn(min = 300.dp, max = 600.dp).background(Color.Black), contentAlignment = Alignment.Center) {
-                    if (ext == "webm" || ext == "mp4") {
+                    if (ext == "swf") {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .pointerInput(Unit) {
+                                    detectTapGestures(
+                                        onDoubleTap = {
+                                            scope.launch {
+                                                showBigHeart = true
+                                                bigHeartScale.snapTo(0f)
+                                                bigHeartAlpha.snapTo(1f)
+                                                launch { bigHeartScale.animateTo(1.5f, tween(400, easing = FastOutSlowInEasing)) }
+                                                launch {
+                                                    delay(200)
+                                                    bigHeartAlpha.animateTo(0f, tween(300))
+                                                }
+                                            }
+                                            if (!LocalPostManager.isFavorited(post)) {
+                                                LocalPostManager.setFavorite(post, true)
+                                                scope.launch {
+                                                    try {
+                                                        val response = NetworkModule.api!!.addFavorite(post.id)
+                                                        if (!(response.isSuccessful || response.code() == 422)) {
+                                                            LocalPostManager.setFavorite(post, false)
+                                                            if (response.code() == 401 || response.code() == 403) {
+                                                                Toast.makeText(context, strings.favAddFailedLogin, Toast.LENGTH_SHORT).show()
+                                                            }
+                                                        }
+                                                    } catch (e: Exception) {
+                                                        LocalPostManager.setFavorite(post, false)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    )
+                                }
+                                .padding(24.dp)
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.ic_launcher_warning),
+                                contentDescription = strings.unsupportedSwf,
+                                modifier = Modifier.size(120.dp).padding(bottom = 16.dp),
+                                contentScale = ContentScale.Fit
+                            )
+                            Text(
+                                text = strings.unsupportedSwf,
+                                color = NeonOrange,
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    shadow = androidx.compose.ui.graphics.Shadow(
+                                        color = NeonOrange.copy(alpha = 0.6f),
+                                        offset = Offset(0f, 0f),
+                                        blurRadius = 16f
+                                    )
+                                ),
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    } else if (ext == "webm" || ext == "mp4") {
                         if (post.file?.url != null) {
                             Box(modifier = Modifier.fillMaxSize()) {
                                 if (!isFullScreen && exoPlayer != null) {
@@ -2184,50 +2384,64 @@ fun DetailScreen(
                                 }
                             }
                         }
-                    } else if (post.file?.url != null) {
-                        val displayUrl = post.sample?.url ?: post.file.url
-                        val detailImageRequest = remember(cachedFile, displayUrl) {
-                            ImageRequest.Builder(context).data(cachedFile ?: displayUrl).crossfade(200).build()
-                        }
-                        AsyncImage(
-                            model = detailImageRequest,
-                            imageLoader = gifEnabledLoader,
-                            contentDescription = "Full Image",
-                            modifier = Modifier.fillMaxSize().pointerInput(Unit) {
-                                detectTapGestures(
-                                    onTap = { isFullScreen = true },
-                                    onDoubleTap = {
-                                        scope.launch {
-                                            showBigHeart = true
-                                            bigHeartScale.snapTo(0f)
-                                            bigHeartAlpha.snapTo(1f)
-                                            launch { bigHeartScale.animateTo(1.5f, tween(400, easing = FastOutSlowInEasing)) }
-                                            launch {
-                                                delay(200)
-                                                bigHeartAlpha.animateTo(0f, tween(300))
-                                            }
-                                        }
-                                        if (!LocalPostManager.isFavorited(post)) {
-                                            LocalPostManager.setFavorite(post, true)
+                    } else if (post.file?.url != null || post.sample?.url != null || post.preview?.url != null) {
+                        val displayUrl = post.sample?.url ?: post.file?.url ?: post.preview?.url
+                        if (displayUrl != null) {
+                            val imageDataSource = cachedFile ?: displayUrl
+                            val detailImageRequest = remember(imageDataSource, cfClearanceCookie) {
+                                ImageRequest.Builder(context)
+                                    .data(imageDataSource)
+                                    .addHeader("User-Agent", NetworkModule.DEFAULT_USER_AGENT)
+                                    .apply {
+                                        if (cfClearanceCookie.isNotBlank()) addHeader("Cookie", cfClearanceCookie)
+                                    }
+                                    .crossfade(200)
+                                    .build()
+                            }
+                            AsyncImage(
+                                model = detailImageRequest,
+                                imageLoader = gifEnabledLoader,
+                                contentDescription = "Full Image",
+                                modifier = Modifier.fillMaxSize().pointerInput(Unit) {
+                                    detectTapGestures(
+                                        onTap = { isFullScreen = true },
+                                        onDoubleTap = {
                                             scope.launch {
-                                                try {
-                                                    val response = NetworkModule.api!!.addFavorite(post.id)
-                                                    if (!(response.isSuccessful || response.code() == 422)) {
-                                                        LocalPostManager.setFavorite(post, false)
-                                                        if (response.code() == 401 || response.code() == 403) {
-                                                            Toast.makeText(context, strings.favAddFailedLogin, Toast.LENGTH_SHORT).show()
+                                                showBigHeart = true
+                                                bigHeartScale.snapTo(0f)
+                                                bigHeartAlpha.snapTo(1f)
+                                                launch { bigHeartScale.animateTo(1.5f, tween(400, easing = FastOutSlowInEasing)) }
+                                                launch {
+                                                    delay(200)
+                                                    bigHeartAlpha.animateTo(0f, tween(300))
+                                                }
+                                            }
+                                            if (!LocalPostManager.isFavorited(post)) {
+                                                LocalPostManager.setFavorite(post, true)
+                                                scope.launch {
+                                                    try {
+                                                        val response = NetworkModule.api!!.addFavorite(post.id)
+                                                        if (!(response.isSuccessful || response.code() == 422)) {
+                                                            LocalPostManager.setFavorite(post, false)
+                                                            if (response.code() == 401 || response.code() == 403) {
+                                                                Toast.makeText(context, strings.favAddFailedLogin, Toast.LENGTH_SHORT).show()
+                                                            }
                                                         }
+                                                    } catch (e: Exception) {
+                                                        LocalPostManager.setFavorite(post, false)
                                                     }
-                                                } catch (e: Exception) {
-                                                    LocalPostManager.setFavorite(post, false)
                                                 }
                                             }
                                         }
-                                    }
-                                )
-                            },
-                            contentScale = ContentScale.Fit
-                        )
+                                    )
+                                },
+                                contentScale = ContentScale.Fit
+                            )
+                        } else {
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(64.dp))
+                        }
+                    } else {
+                        Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(64.dp))
                     }
 
                     if (showBigHeart) {
@@ -2505,10 +2719,11 @@ fun CommentsSection(postId: Int) {
 }
 
 @Composable
-fun ZoomableImage(imageUrl: String, imageLoader: ImageLoader, onClose: () -> Unit) {
+fun ZoomableImage(imageUrl: String, imageLoader: ImageLoader, cfClearanceCookie: String, onClose: () -> Unit) {
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     val strings = LocalStrings.current
+    val context = LocalContext.current
 
     Box(
         modifier = Modifier.fillMaxSize().background(Color.Black)
@@ -2520,7 +2735,15 @@ fun ZoomableImage(imageUrl: String, imageLoader: ImageLoader, onClose: () -> Uni
                 }
             }
     ) {
-        AsyncImage(model = if (imageUrl.startsWith("/")) File(imageUrl) else imageUrl, imageLoader = imageLoader, contentDescription = "Zoomable Image", modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y), contentScale = ContentScale.Fit)
+        val zoomImageRequest = remember(imageUrl, cfClearanceCookie) {
+            ImageRequest.Builder(context)
+                .data(if (imageUrl.startsWith("/")) File(imageUrl) else imageUrl)
+                .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
+                .apply { if (cfClearanceCookie.isNotBlank()) addHeader("Cookie", cfClearanceCookie) }
+                .build()
+        }
+
+        AsyncImage(model = zoomImageRequest, imageLoader = imageLoader, contentDescription = "Zoomable Image", modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y), contentScale = ContentScale.Fit)
         IconButton(onClick = onClose, modifier = Modifier.align(Alignment.TopEnd).systemBarsPadding().padding(16.dp)) { Icon(Icons.Default.Close, contentDescription = strings.cdClose, tint = Color.White) }
     }
 }
