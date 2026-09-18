@@ -1,6 +1,6 @@
 # 🦊 HIDEOUT (e621 Android Client)
 
-![Version](https://img.shields.io/badge/Version-2026--09--17-FF6B00?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-2026--09--18-FF6B00?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-GPL_3.0-blue?style=for-the-badge)
 ![Android](https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&logo=android&logoColor=white)
 ![Kotlin](https://img.shields.io/badge/Kotlin-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)
@@ -8,7 +8,7 @@
 ![WireGuard](https://img.shields.io/badge/WireGuard-881798?style=for-the-badge&logo=wireguard&logoColor=white)
 ![Downloads](https://img.shields.io/github/downloads/Canned-F0xy/HIDEOUT-e621_Android_Client/total.svg?style=for-the-badge&color=yellow&label=다운로드)
 
-<img width="3449" height="1708" alt="Image" src="https://github.com/user-attachments/assets/2621aaad-7263-4eca-92dd-0e0e60d62a9b" />
+<img width="3350" height="1632" alt="Image" src="https://github.com/user-attachments/assets/9a02bf83-1591-4b99-89ec-c3406d3b2023" />
 <img width="1440" height="4871" alt="Image" src="https://github.com/user-attachments/assets/a4967b32-cbf0-4761-878f-a5888e9c6599" />
 
 **HIDEOUT**은 제약 없이 안전하게 e621을 탐색할 수 있도록 설계된 최상급 안드로이드 전용 클라이언트 앱입니다.
