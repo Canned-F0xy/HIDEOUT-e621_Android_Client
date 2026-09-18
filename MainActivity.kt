@@ -91,9 +91,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
@@ -385,7 +387,7 @@ object KoStrings : AppStrings {
     override fun updateMessage(ver: String) = "새로운 버전 $ver 이 배포되었습니다. 다운로드하시겠습니까?"
     override val updateButton = "업데이트"
     override val laterButton = "나중에"
-    override val exportSettings = "설정 데이터 내보내기 (.json)"
+    override val exportSettings = "Export Settings (.json)"
     override val importSettings = "설정 데이터 불러오기 (.json)"
     override val exportSuccess = "설정 파일(.json)을 성공적으로 저장했습니다."
     override val importSuccess = "데이터를 성공적으로 불러왔습니다."
@@ -1035,9 +1037,11 @@ fun MainApp(
     val currentTag = currentEntry.query
     val selectedPostIndex = currentEntry.detailIdx
 
-    var searchInput by remember { mutableStateOf("") }
+    var searchInput by remember { mutableStateOf(TextFieldValue("")) }
+
     LaunchedEffect(currentTag) {
-        searchInput = if (currentTag == "#HOT#") "" else currentTag
+        val text = if (currentTag == "#HOT#") "" else currentTag
+        searchInput = TextFieldValue(text = text, selection = TextRange(text.length))
     }
 
     val blacklistedList = remember(blacklistedTagsSet) { blacklistedTagsSet.toList() }
@@ -1339,11 +1343,7 @@ fun MainApp(
                 gifEnabledLoader = gifEnabledLoader,
                 cfClearanceCookie = cfClearanceCookie,
                 onClose = {
-                    if (navStack.size > 1 && currentEntry.detailIdx == null) {
-                        popStack()
-                    } else {
-                        closeDetail()
-                    }
+                    closeDetail()
                 },
                 onTagClick = { clickedTag -> pushTag(clickedTag) },
                 onPageChanged = { newIdx ->
@@ -1364,7 +1364,7 @@ fun MainApp(
                 gifEnabledLoader = gifEnabledLoader,
                 cfClearanceCookie = cfClearanceCookie,
                 onSearchInputChange = { searchInput = it },
-                onSearch = { if (searchInput != currentTag) pushTag(searchInput) },
+                onSearch = { if (searchInput.text != currentTag) pushTag(searchInput.text) },
                 isVpnActive = (vpnState == Tunnel.State.UP),
                 onVpnActionClick = {
                     if (vpnState == Tunnel.State.UP) {
@@ -1496,11 +1496,11 @@ fun CloudflareBypassDialog(onSuccess: (String) -> Unit, onCancel: () -> Unit) {
 @Composable
 fun GalleryScreen(
     lazyPagingItems: LazyPagingItems<Post>,
-    searchInput: String, currentAppliedTag: String,
+    searchInput: TextFieldValue, currentAppliedTag: String,
     gridState: LazyStaggeredGridState,
     gifEnabledLoader: ImageLoader,
     cfClearanceCookie: String,
-    onSearchInputChange: (String) -> Unit, onSearch: () -> Unit,
+    onSearchInputChange: (TextFieldValue) -> Unit, onSearch: () -> Unit,
     isVpnActive: Boolean, onVpnActionClick: () -> Unit, onPostClick: (Int) -> Unit,
     isDarkTheme: Boolean, onThemeToggle: () -> Unit,
     isNsfwEnabled: Boolean, onNsfwToggle: () -> Unit,
@@ -1604,165 +1604,160 @@ fun GalleryScreen(
     }
 
     if (showLoginDialog) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         var tempUser by remember { mutableStateOf(loginUsername) }
         var tempKey by remember { mutableStateOf(loginApiKey) }
 
-        Dialog(onDismissRequest = { showLoginDialog = false }) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(modifier = Modifier.fillMaxWidth().padding(24.dp)) {
-                    Text(strings.accountLogin, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(strings.apiKeyInfo, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(modifier = Modifier.height(24.dp))
-                    OutlinedTextField(value = tempUser, onValueChange = { tempUser = it }, label = { Text(strings.usernameHint) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    Spacer(modifier = Modifier.height(12.dp))
-                    OutlinedTextField(value = tempKey, onValueChange = { tempKey = it }, label = { Text(strings.apiKeyHint) }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-                    Spacer(modifier = Modifier.height(32.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        if (loginUsername.isNotBlank()) {
-                            TextButton(onClick = { onLoginSave("", ""); showLoginDialog = false }, modifier = Modifier.padding(end = 8.dp)) { Text(strings.logout, color = Color.Red) }
-                        }
-                        TextButton(onClick = { showLoginDialog = false }, modifier = Modifier.padding(end = 8.dp)) { Text(strings.cancel, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        Button(onClick = { onLoginSave(tempUser, tempKey); showLoginDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) { Text(strings.save, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold) }
+        ModalBottomSheet(
+            onDismissRequest = { showLoginDialog = false },
+            sheetState = sheetState,
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp)) {
+                Text(strings.accountLogin, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(strings.apiKeyInfo, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(modifier = Modifier.height(24.dp))
+                OutlinedTextField(value = tempUser, onValueChange = { tempUser = it }, label = { Text(strings.usernameHint) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(value = tempKey, onValueChange = { tempKey = it }, label = { Text(strings.apiKeyHint) }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+                Spacer(modifier = Modifier.height(32.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    if (loginUsername.isNotBlank()) {
+                        TextButton(onClick = { onLoginSave("", ""); showLoginDialog = false }, modifier = Modifier.padding(end = 8.dp)) { Text(strings.logout, color = Color.Red) }
                     }
+                    TextButton(onClick = { showLoginDialog = false }, modifier = Modifier.padding(end = 8.dp)) { Text(strings.cancel, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    Button(onClick = { onLoginSave(tempUser, tempKey); showLoginDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) { Text(strings.save, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold) }
                 }
+                Spacer(modifier = Modifier.height(WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()))
             }
         }
     }
 
     if (showBlacklistDialog) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         var newTag by remember { mutableStateOf("") }
         var currentList by remember { mutableStateOf(blacklistedTags) }
 
-        Dialog(onDismissRequest = { showBlacklistDialog = false }) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(modifier = Modifier.fillMaxWidth().padding(24.dp)) {
-                    Text(strings.blacklistManagement, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(strings.blacklistInfo, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(value = newTag, onValueChange = { newTag = it }, modifier = Modifier.weight(1f), label = { Text(strings.tagInputHint) }, singleLine = true)
-                        Spacer(modifier = Modifier.width(12.dp))
-                        IconButton(onClick = {
-                            if (newTag.isNotBlank() && !currentList.contains(newTag.trim())) { currentList = currentList + newTag.trim(); newTag = "" }
-                        }, modifier = Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha=0.15f), RoundedCornerShape(12.dp))) {
-                            Icon(Icons.Default.Add, contentDescription = strings.cdAdd, tint = MaterialTheme.colorScheme.primary)
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-                    LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
-                        items(currentList) { tag ->
-                            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                Text(tag, color = MaterialTheme.colorScheme.onBackground)
-                                IconButton(onClick = { currentList = currentList - tag }) { Icon(Icons.Default.Delete, contentDescription = strings.cdDelete, tint = Color.Red) }
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = { showBlacklistDialog = false }, modifier = Modifier.padding(end = 8.dp)) { Text(strings.cancel, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        Button(onClick = { onBlacklistSave(currentList); showBlacklistDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) { Text(strings.save, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold) }
+        ModalBottomSheet(
+            onDismissRequest = { showBlacklistDialog = false },
+            sheetState = sheetState,
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp)) {
+                Text(strings.blacklistManagement, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(strings.blacklistInfo, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(modifier = Modifier.height(24.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(value = newTag, onValueChange = { newTag = it }, modifier = Modifier.weight(1f), label = { Text(strings.tagInputHint) }, singleLine = true)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    IconButton(onClick = {
+                        if (newTag.isNotBlank() && !currentList.contains(newTag.trim())) { currentList = currentList + newTag.trim(); newTag = "" }
+                    }, modifier = Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha=0.15f), RoundedCornerShape(12.dp))) {
+                        Icon(Icons.Default.Add, contentDescription = strings.cdAdd, tint = MaterialTheme.colorScheme.primary)
                     }
                 }
+                Spacer(modifier = Modifier.height(16.dp))
+                LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
+                    items(currentList) { tag ->
+                        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text(tag, color = MaterialTheme.colorScheme.onBackground)
+                            IconButton(onClick = { currentList = currentList - tag }) { Icon(Icons.Default.Delete, contentDescription = strings.cdDelete, tint = Color.Red) }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = { showBlacklistDialog = false }, modifier = Modifier.padding(end = 8.dp)) { Text(strings.cancel, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    Button(onClick = { onBlacklistSave(currentList); showBlacklistDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) { Text(strings.save, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold) }
+                }
+                Spacer(modifier = Modifier.height(WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()))
             }
         }
     }
 
     if (showSettingsDialog) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         var currentCacheSize by remember(showSettingsDialog) { mutableStateOf(getCacheSizeString(context)) }
 
-        Dialog(onDismissRequest = { showSettingsDialog = false }) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(modifier = Modifier.fillMaxWidth().padding(24.dp).verticalScroll(rememberScrollState())) {
-                    Text(strings.appSettings, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(24.dp))
+        ModalBottomSheet(
+            onDismissRequest = { showSettingsDialog = false },
+            sheetState = sheetState,
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp).verticalScroll(rememberScrollState())) {
+                Text(strings.appSettings, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(24.dp))
 
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onThemeToggle() }.padding(vertical = 8.dp)) {
-                        Text(strings.useDarkTheme, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
-                        Switch(checked = isDarkTheme, onCheckedChange = { onThemeToggle() }, colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary, checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)))
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onThemeToggle() }.padding(vertical = 8.dp)) {
+                    Text(strings.useDarkTheme, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                    Switch(checked = isDarkTheme, onCheckedChange = { onThemeToggle() }, colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary, checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)))
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onAutoPlayToggle() }.padding(vertical = 8.dp)) {
+                    Text(strings.autoPlayVideo, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                    Switch(checked = isAutoPlay, onCheckedChange = { onAutoPlayToggle() }, colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary, checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)))
+                }
+
+                Spacer(Modifier.height(16.dp))
+                Text(strings.appLanguageLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    Card(modifier = Modifier.weight(1f).clickable { onLanguageChange("ko") }, shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = if (appLanguage == "ko") MaterialTheme.colorScheme.primary.copy(alpha=0.1f) else MaterialTheme.colorScheme.surfaceVariant)) {
+                        Text(strings.languageKo, textAlign = TextAlign.Center, fontWeight = if (appLanguage == "ko") FontWeight.Bold else FontWeight.Normal, color = if (appLanguage == "ko") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(16.dp))
                     }
-
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onAutoPlayToggle() }.padding(vertical = 8.dp)) {
-                        Text(strings.autoPlayVideo, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
-                        Switch(checked = isAutoPlay, onCheckedChange = { onAutoPlayToggle() }, colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary, checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)))
-                    }
-
-                    Spacer(Modifier.height(16.dp))
-                    Text(strings.appLanguageLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                        Card(modifier = Modifier.weight(1f).clickable { onLanguageChange("ko") }, shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = if (appLanguage == "ko") MaterialTheme.colorScheme.primary.copy(alpha=0.1f) else MaterialTheme.colorScheme.surfaceVariant)) {
-                            Text(strings.languageKo, textAlign = TextAlign.Center, fontWeight = if (appLanguage == "ko") FontWeight.Bold else FontWeight.Normal, color = if (appLanguage == "ko") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(16.dp))
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Card(modifier = Modifier.weight(1f).clickable { onLanguageChange("en") }, shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = if (appLanguage == "en") MaterialTheme.colorScheme.primary.copy(alpha=0.1f) else MaterialTheme.colorScheme.surfaceVariant)) {
-                            Text(strings.languageEn, textAlign = TextAlign.Center, fontWeight = if (appLanguage == "en") FontWeight.Bold else FontWeight.Normal, color = if (appLanguage == "en") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(16.dp))
-                        }
-                    }
-
-                    Spacer(Modifier.height(24.dp))
-                    Text(strings.downloadLocation, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Box(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                        OutlinedButton(onClick = { dirPickerLauncher.launch(null) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
-                            Text(if (savedTreeUri.isEmpty()) strings.defaultFolder else strings.customFolder, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(vertical = 4.dp))
-                        }
-                    }
-
-                    Spacer(Modifier.height(24.dp))
-                    Text(strings.cacheManagement, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("${strings.cacheSizeLabel}$currentCacheSize", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
-                        Button(onClick = {
-                            context.cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-                            currentCacheSize = getCacheSizeString(context)
-                            Toast.makeText(context, strings.cacheCleared, Toast.LENGTH_SHORT).show()
-                        }, colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha=0.15f)), shape = RoundedCornerShape(12.dp)) {
-                            Text(strings.clearCache, color = Color.Red, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    Spacer(Modifier.height(24.dp))
-                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
-                    Spacer(Modifier.height(8.dp))
-
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        OutlinedButton(onClick = { exportLauncher.launch("hideout_settings_backup.json") }, modifier = Modifier.weight(1f).padding(end = 6.dp), shape = RoundedCornerShape(12.dp)) {
-                            Text(strings.exportSettings, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 4.dp))
-                        }
-                        OutlinedButton(onClick = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, modifier = Modifier.weight(1f).padding(start = 6.dp), shape = RoundedCornerShape(12.dp)) {
-                            Text(strings.importSettings, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 4.dp))
-                        }
-                    }
-
-                    Spacer(Modifier.height(16.dp))
-                    OutlinedButton(
-                        onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Canned-F0xy"))) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
-                    ) {
-                        Icon(Icons.Default.OpenInNew, contentDescription = strings.cdOpenBrowser, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(strings.devGithub, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(vertical = 4.dp))
-                    }
-
-                    Spacer(Modifier.height(8.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = { showSettingsDialog = false }) { Text(strings.close, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    Spacer(Modifier.width(12.dp))
+                    Card(modifier = Modifier.weight(1f).clickable { onLanguageChange("en") }, shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = if (appLanguage == "en") MaterialTheme.colorScheme.primary.copy(alpha=0.1f) else MaterialTheme.colorScheme.surfaceVariant)) {
+                        Text(strings.languageEn, textAlign = TextAlign.Center, fontWeight = if (appLanguage == "en") FontWeight.Bold else FontWeight.Normal, color = if (appLanguage == "en") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(16.dp))
                     }
                 }
+
+                Spacer(Modifier.height(24.dp))
+                Text(strings.downloadLocation, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Box(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    OutlinedButton(onClick = { dirPickerLauncher.launch(null) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
+                        Text(if (savedTreeUri.isEmpty()) strings.defaultFolder else strings.customFolder, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(vertical = 4.dp))
+                    }
+                }
+
+                Spacer(Modifier.height(24.dp))
+                Text(strings.cacheManagement, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("${strings.cacheSizeLabel}$currentCacheSize", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                    Button(onClick = {
+                        context.cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                        currentCacheSize = getCacheSizeString(context)
+                        Toast.makeText(context, strings.cacheCleared, Toast.LENGTH_SHORT).show()
+                    }, colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha=0.15f)), shape = RoundedCornerShape(12.dp)) {
+                        Text(strings.clearCache, color = Color.Red, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Spacer(Modifier.height(24.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                Spacer(Modifier.height(8.dp))
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    OutlinedButton(onClick = { exportLauncher.launch("hideout_settings_backup.json") }, modifier = Modifier.weight(1f).padding(end = 6.dp), shape = RoundedCornerShape(12.dp)) {
+                        Text(strings.exportSettings, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 4.dp))
+                    }
+                    OutlinedButton(onClick = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, modifier = Modifier.weight(1f).padding(start = 6.dp), shape = RoundedCornerShape(12.dp)) {
+                        Text(strings.importSettings, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 4.dp))
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+                OutlinedButton(
+                    onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Canned-F0xy"))) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Icon(Icons.Default.OpenInNew, contentDescription = strings.cdOpenBrowser, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(strings.devGithub, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(vertical = 4.dp))
+                }
+                Spacer(modifier = Modifier.height(WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()))
             }
         }
     }
@@ -1791,7 +1786,7 @@ fun GalleryScreen(
                         Image(painter = painterResource(id = R.drawable.ic_launcher2), contentDescription = strings.cdLogo, modifier = Modifier.size(64.dp).clip(RoundedCornerShape(16.dp)))
                         Spacer(modifier = Modifier.height(12.dp))
                         Text("HIDEOUT", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black, letterSpacing = 2.sp), color = MaterialTheme.colorScheme.primary)
-                        Text("Ver. 2026-09-17", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Ver. 2026-09-18", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
 
@@ -1862,9 +1857,9 @@ fun GalleryScreen(
             ) {
                 Box(modifier = Modifier.size(0.dp).focusRequester(focusRequester).focusable())
 
-                LaunchedEffect(searchInput, isSearchFocused) {
+                LaunchedEffect(searchInput.text, isSearchFocused) {
                     if (!isSearchFocused) { expanded = false; return@LaunchedEffect }
-                    val lastWord = searchInput.split(" ").lastOrNull() ?: ""
+                    val lastWord = searchInput.text.split(" ").lastOrNull() ?: ""
                     if (lastWord.length >= 2) {
                         delay(300)
                         try {
@@ -1952,7 +1947,11 @@ fun GalleryScreen(
                                         val md5 = post.file?.md5 ?: ""
                                         val cachedFile = getCachedFile(context, md5, ext)
 
-                                        val imageModel = cachedFile ?: post.preview?.url ?: post.sample?.url ?: post.file?.url
+                                        val imageModel = if (ext == "swf") {
+                                            post.preview?.url ?: post.sample?.url
+                                        } else {
+                                            cachedFile ?: post.preview?.url ?: post.sample?.url ?: post.file?.url
+                                        }
 
                                         Card(
                                             modifier = Modifier.fillMaxWidth().clickable { focusManager.clearFocus(force = true); keyboardController?.hide(); onPostClick(index) },
@@ -2093,10 +2092,11 @@ fun GalleryScreen(
                                 items(tagSuggestions) { tag ->
                                     Row(
                                         modifier = Modifier.fillMaxWidth().clickable {
-                                            val words = searchInput.split(" ").dropLast(1).toMutableList()
+                                            val words = searchInput.text.split(" ").dropLast(1).toMutableList()
                                             if (words.isNotEmpty() && words[0].isBlank()) words.clear()
                                             words.add(tag.name)
-                                            onSearchInputChange(words.joinToString(" ") + " ")
+                                            val newText = words.joinToString(" ") + " "
+                                            onSearchInputChange(TextFieldValue(newText, TextRange(newText.length)))
                                             expanded = false
                                         }.padding(horizontal = 20.dp, vertical = 14.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -2385,9 +2385,14 @@ fun DetailScreen(
                             }
                         }
                     } else if (post.file?.url != null || post.sample?.url != null || post.preview?.url != null) {
-                        val displayUrl = post.sample?.url ?: post.file?.url ?: post.preview?.url
+                        val displayUrl = if (ext == "swf") {
+                            post.sample?.url ?: post.preview?.url
+                        } else {
+                            post.sample?.url ?: post.file?.url ?: post.preview?.url
+                        }
+
                         if (displayUrl != null) {
-                            val imageDataSource = cachedFile ?: displayUrl
+                            val imageDataSource = if (ext == "swf") displayUrl else (cachedFile ?: displayUrl)
                             val detailImageRequest = remember(imageDataSource, cfClearanceCookie) {
                                 ImageRequest.Builder(context)
                                     .data(imageDataSource)
