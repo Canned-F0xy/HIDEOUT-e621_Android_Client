@@ -12,14 +12,14 @@ object SimilarImageSearch {
     suspend fun findSimilarQuery(post: Post): String? = withContext(Dispatchers.IO) {
         val api = NetworkModule.api ?: return@withContext null
         var ids = try {
-            parseIds(api.iqdbByPost(post.id, post.id).string())
+            parseIds(api.iqdbByPost(post.id).string())
         } catch (e: Exception) {
             emptyList()
         }
         if (ids.isEmpty()) {
             val imageUrl = post.preview?.url ?: post.sample?.url ?: return@withContext null
             ids = try {
-                parseIds(api.iqdbByUrl(imageUrl, imageUrl).string())
+                parseIds(api.iqdbByUrl(imageUrl).string())
             } catch (e: Exception) {
                 emptyList()
             }
