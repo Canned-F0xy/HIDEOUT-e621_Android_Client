@@ -194,8 +194,6 @@ interface AppStrings {
     val vpnReconnectFailed: String
     val cdSimilarSearch: String
     val similarNotFound: String
-    val cdToggleMute: String
-    val videoMutedTitle: String
     val collectionsMenu: String
     val collectionsTitle: String
     val collectionsEmpty: String
