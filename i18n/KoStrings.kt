@@ -194,8 +194,6 @@ object KoStrings : AppStrings {
     override val vpnReconnectFailed = "VPN 재연결에 실패했습니다. 직접 다시 연결해주세요."
     override val cdSimilarSearch = "비슷한 이미지 찾기"
     override val similarNotFound = "비슷한 이미지를 찾지 못했습니다."
-    override val cdToggleMute = "음소거 전환"
-    override val videoMutedTitle = "동영상 기본 음소거"
     override val collectionsMenu = "로컬 컬렉션"
     override val collectionsTitle = "로컬 컬렉션"
     override val collectionsEmpty = "아직 만든 컬렉션이 없습니다."
