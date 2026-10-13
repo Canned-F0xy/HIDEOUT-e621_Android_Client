@@ -59,17 +59,13 @@ interface E621ApiService {
     @GET("users/{id}.json")
     suspend fun getUser(@Path("id") userId: Int): ResponseBody
 
-    @GET("iqdb_queries.json")
-    suspend fun iqdbByPost(
-        @Query("post_id") postId: Int,
-        @Query("search[post_id]") searchPostId: Int
-    ): ResponseBody
+    @POST("iqdb_queries.json")
+    @FormUrlEncoded
+    suspend fun iqdbByPost(@Field("search[post_id]") postId: Int): ResponseBody
 
-    @GET("iqdb_queries.json")
-    suspend fun iqdbByUrl(
-        @Query("url") url: String,
-        @Query("search[url]") searchUrl: String
-    ): ResponseBody
+    @POST("iqdb_queries.json")
+    @FormUrlEncoded
+    suspend fun iqdbByUrl(@Field("search[url]") url: String): ResponseBody
 
     @GET("tags.json")
     suspend fun searchTags(
