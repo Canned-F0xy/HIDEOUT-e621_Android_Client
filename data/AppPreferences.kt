@@ -43,7 +43,6 @@ class AppPreferences(private val context: Context) {
         val KEY_KILL_SWITCH = booleanPreferencesKey("vpn_kill_switch")
         val KEY_AUTO_RECONNECT = booleanPreferencesKey("vpn_auto_reconnect")
         val KEY_INCOGNITO = booleanPreferencesKey("incognito_mode")
-        val KEY_VIDEO_MUTED = booleanPreferencesKey("video_muted_default")
         val KEY_DATA_SAVER = booleanPreferencesKey("data_saver_mode")
         val KEY_IMAGE_QUALITY = stringPreferencesKey("image_quality")
         val KEY_VIDEO_QUALITY = stringPreferencesKey("video_quality")
@@ -78,7 +77,6 @@ class AppPreferences(private val context: Context) {
     val isKillSwitchEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_KILL_SWITCH] ?: false }
     val isAutoReconnectEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_AUTO_RECONNECT] ?: true }
     val isIncognito: Flow<Boolean> = context.dataStore.data.map { it[KEY_INCOGNITO] ?: false }
-    val isVideoMutedDefault: Flow<Boolean> = context.dataStore.data.map { it[KEY_VIDEO_MUTED] ?: false }
     val imageQuality: Flow<MediaQuality> = context.dataStore.data.map {
         val stored = it[KEY_IMAGE_QUALITY]
         if (stored != null) MediaQuality.fromKey(stored)
@@ -167,7 +165,6 @@ class AppPreferences(private val context: Context) {
 
     suspend fun setKillSwitch(value: Boolean) = context.dataStore.edit { it[KEY_KILL_SWITCH] = value }
     suspend fun setAutoReconnect(value: Boolean) = context.dataStore.edit { it[KEY_AUTO_RECONNECT] = value }
-    suspend fun setVideoMutedDefault(value: Boolean) = context.dataStore.edit { it[KEY_VIDEO_MUTED] = value }
     suspend fun setIncognito(value: Boolean) = context.dataStore.edit {
         it[KEY_INCOGNITO] = value
         if (value) it.remove(KEY_SEARCH_STACK)
@@ -247,7 +244,6 @@ class AppPreferences(private val context: Context) {
             autoReconnect = data[KEY_AUTO_RECONNECT] ?: true,
             incognito = data[KEY_INCOGNITO] ?: false,
             originalQuality = data[KEY_ORIGINAL_QUALITY] ?: true,
-            videoMuted = data[KEY_VIDEO_MUTED] ?: false,
             dataSaver = data[KEY_DATA_SAVER] ?: false,
             imageQuality = data[KEY_IMAGE_QUALITY] ?: MediaQuality.DEFAULT.key,
             videoQuality = data[KEY_VIDEO_QUALITY] ?: MediaQuality.DEFAULT.key,
@@ -282,7 +278,6 @@ class AppPreferences(private val context: Context) {
                 importObj.autoReconnect?.let { v -> it[KEY_AUTO_RECONNECT] = v }
                 importObj.incognito?.let { v -> it[KEY_INCOGNITO] = v }
                 importObj.originalQuality?.let { v -> it[KEY_ORIGINAL_QUALITY] = v }
-                importObj.videoMuted?.let { v -> it[KEY_VIDEO_MUTED] = v }
                 importObj.dataSaver?.let { v -> it[KEY_DATA_SAVER] = v }
                 importObj.imageQuality?.let { v -> it[KEY_IMAGE_QUALITY] = MediaQuality.fromKey(v).key }
                 importObj.videoQuality?.let { v -> it[KEY_VIDEO_QUALITY] = MediaQuality.fromKey(v).key }
@@ -314,7 +309,6 @@ data class ExportSettings(
     val autoReconnect: Boolean? = null,
     val incognito: Boolean? = null,
     val originalQuality: Boolean? = null,
-    val videoMuted: Boolean? = null,
     val dataSaver: Boolean? = null,
     val imageQuality: String? = null,
     val videoQuality: String? = null,
