@@ -48,7 +48,6 @@ fun AdvancedSettingsSection(appPrefs: AppPreferences) {
     val isSecureScreen by appPrefs.isSecureScreen.collectAsState(initial = false)
     val imageQuality by appPrefs.imageQuality.collectAsState(initial = MediaQuality.DEFAULT)
     val videoQuality by appPrefs.videoQuality.collectAsState(initial = MediaQuality.DEFAULT)
-    val isVideoMutedDefault by appPrefs.isVideoMutedDefault.collectAsState(initial = false)
     val downloadTreeUri by appPrefs.downloadTreeUri.collectAsState(initial = "")
     val isKillSwitchEnabled by appPrefs.isKillSwitchEnabled.collectAsState(initial = false)
     val isDataSaverEnabled by appPrefs.isDataSaverEnabled.collectAsState(initial = false)
@@ -87,12 +86,6 @@ fun AdvancedSettingsSection(appPrefs: AppPreferences) {
             description = strings.dataSaverDescription,
             checked = isDataSaverEnabled,
             onToggle = { scope.launch { appPrefs.setDataSaver(!isDataSaverEnabled) } }
-        )
-        SettingSwitchRow(
-            title = strings.videoMutedTitle,
-            description = null,
-            checked = isVideoMutedDefault,
-            onToggle = { scope.launch { appPrefs.setVideoMutedDefault(!isVideoMutedDefault) } }
         )
         SettingSwitchRow(
             title = strings.vaultStorageTitle,
