@@ -47,7 +47,7 @@ Along with a trendy UI based on Jetpack Compose, it integrates a **built-in VPN 
   * **태그 정보:** 태그를 길게 누르면 위키 설명과 포스트 수를 확인하고 바로 팔로우·블랙리스트에 추가할 수 있습니다.
   * **열람 기록 & 로컬 컬렉션:** 최근 본 포스트를 다시 찾고, 로그인 없이 기기 안에 폴더별로 모아둘 수 있습니다.
 
-* **미디어 뷰어 & 생태계 연동 (Media Viewer & Ecosystem):** e621 댓글 확인, 묶음 앨범(Pools), 부모/자식(Parent/Child) 연관 포스트를 원클릭으로 모아볼 수 있습니다. **Pool 리더 모드**로 만화형 콘텐츠를 원래 순서대로 세로 스크롤하며 읽을 수 있고, 내장 WebM/MP4 플레이어(ExoPlayer)는 **음소거, 재생 속도 조절(0.5x~2x), 더블 탭 10초 이동**을 지원합니다.
+* **미디어 뷰어 & 생태계 연동 (Media Viewer & Ecosystem):** e621 댓글 확인, 묶음 앨범(Pools), 부모/자식(Parent/Child) 연관 포스트를 원클릭으로 모아볼 수 있습니다. Pool 리더 모드로 만화형 콘텐츠를 원래 순서대로 세로 스크롤하며 읽을 수 있고, 내장 WebM/MP4 플레이어(ExoPlayer)는 더블 탭 10초 이동을 지원합니다.
 
 * **추천 & 즐겨찾기 연동 (Votes & Favorites):** 상세 화면에서 추천(👍)·비추천(👎)을 할 수 있으며, **추천하면 e621 즐겨찾기에 자동으로 추가**되어 썸네일에 하트가 표시됩니다. e621 계정의 블랙리스트도 앱으로 가져올 수 있습니다.
 
@@ -90,7 +90,7 @@ Along with a trendy UI based on Jetpack Compose, it integrates a **built-in VPN 
   * **Tag Info:** Long-press a tag to see its wiki and post count, then follow or blacklist it on the spot.
   * **View History & Local Collections:** Revisit recently viewed posts and organize posts into on-device folders without logging in.
 
-* **Media Viewer & Ecosystem Integration:** Read user comments, navigate album Pools, and explore Parent/Child related posts with a single click. **Pool Reader Mode** lets you read comic-style content vertically in its original order, and the built-in WebM/MP4 ExoPlayer supports **mute, playback speed (0.5x–2x), and double-tap 10-second seeking**.
+* **Media Viewer & Ecosystem Integration:** Read user comments, navigate album Pools, and explore Parent/Child related posts with a single click. Pool Reader Mode lets you read comic-style content vertically in its original order, and the built-in WebM/MP4 ExoPlayer supports double-tap 10-second seeking.
 
 * **Votes & Favorites:** Upvote (👍) or downvote (👎) posts from the detail view. **Upvoting automatically adds the post to your e621 favorites**, marked with a heart on its thumbnail. You can also import your e621 account blacklist.
 
