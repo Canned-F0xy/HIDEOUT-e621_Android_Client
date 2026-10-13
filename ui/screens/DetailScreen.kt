@@ -100,7 +100,6 @@ fun DetailScreen(
     var isSearchingSimilar by remember { mutableStateOf(false) }
     var showCollectionPicker by remember { mutableStateOf(false) }
     var tagInfoTarget by remember { mutableStateOf<String?>(null) }
-    val isVideoMutedDefault by appPrefs.isVideoMutedDefault.collectAsState(initial = false)
     val isDataSaverEnabled by appPrefs.isDataSaverEnabled.collectAsState(initial = false)
     val fileNameTemplate by appPrefs.fileNameTemplate.collectAsState(initial = FileNameFormatter.DEFAULT_TEMPLATE)
     val isSavingData = DataSaver.shouldSave(context, isDataSaverEnabled)
@@ -183,7 +182,6 @@ fun DetailScreen(
                         setMediaItem(MediaItem.fromUri(mediaUri))
                         prepare()
                         playWhenReady = isAutoPlay && !DataSaver.shouldSave(context, isDataSaverEnabled)
-                        volume = if (isVideoMutedDefault) 0f else 1f
                         repeatMode = Player.REPEAT_MODE_ALL
                     }
                 exoPlayer = player
