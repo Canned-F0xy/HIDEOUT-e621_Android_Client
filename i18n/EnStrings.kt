@@ -197,8 +197,6 @@ object EnStrings : AppStrings {
     override val vpnReconnectFailed = "Could not reconnect the VPN. Please reconnect manually."
     override val cdSimilarSearch = "Find similar images"
     override val similarNotFound = "No similar images found."
-    override val cdToggleMute = "Toggle mute"
-    override val videoMutedTitle = "Mute videos by default"
     override val collectionsMenu = "Local collections"
     override val collectionsTitle = "Local collections"
     override val collectionsEmpty = "No collections yet."
