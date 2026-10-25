@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.ImageLoader
 import coil.compose.AsyncImage
+import com.CannedF0xy.hideout.data.AppPreferences
 import com.CannedF0xy.hideout.data.CollectionStore
 import com.CannedF0xy.hideout.data.LocalCollection
 import com.CannedF0xy.hideout.i18n.LocalStrings
@@ -58,7 +59,10 @@ import kotlinx.coroutines.launch
 fun CollectionsScreen(
     imageLoader: ImageLoader,
     cfClearanceCookie: String,
-    onOpenPost: (Post) -> Unit,
+    appPrefs: AppPreferences,
+    isDarkTheme: Boolean,
+    isAutoPlay: Boolean,
+    onTagClick: (String) -> Unit,
     onClose: () -> Unit
 ) {
     val strings = LocalStrings.current
@@ -68,6 +72,27 @@ fun CollectionsScreen(
     var openedId by remember { mutableStateOf<Long?>(null) }
     var showCreate by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<LocalCollection?>(null) }
+    var viewerPosts by remember { mutableStateOf<List<Post>?>(null) }
+    var viewerStartIndex by remember { mutableStateOf(0) }
+
+    val openedViewerPosts = viewerPosts
+    if (openedViewerPosts != null && openedViewerPosts.isNotEmpty()) {
+        ListDetailPagerScreen(
+            posts = openedViewerPosts,
+            initialIndex = viewerStartIndex,
+            appPrefs = appPrefs,
+            isDarkTheme = isDarkTheme,
+            isAutoPlay = isAutoPlay,
+            gifEnabledLoader = imageLoader,
+            cfClearanceCookie = cfClearanceCookie,
+            onClose = { viewerPosts = null },
+            onTagClick = { tag ->
+                viewerPosts = null
+                onTagClick(tag)
+            }
+        )
+        return
+    }
 
     LaunchedEffect(Unit) { CollectionStore.ensureLoaded(context) }
 
@@ -115,7 +140,11 @@ fun CollectionsScreen(
                     posts = opened.posts,
                     imageLoader = imageLoader,
                     cfClearanceCookie = cfClearanceCookie,
-                    onPostClick = onOpenPost,
+                    onPostClick = { post ->
+                        val snapshot = opened.posts
+                        viewerStartIndex = snapshot.indexOfFirst { it.id == post.id }.coerceAtLeast(0)
+                        viewerPosts = snapshot
+                    },
                     onRemove = { post -> scope.launch { CollectionStore.removePost(context, opened.id, post.id) } },
                     removeDescription = strings.cdDelete
                 )
