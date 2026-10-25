@@ -63,7 +63,7 @@ fun GalleryDrawerContent(
                 Image(painter = painterResource(id = R.drawable.ic_launcher2), contentDescription = strings.cdLogo, modifier = Modifier.size(64.dp).clip(RoundedCornerShape(16.dp)))
                 Spacer(modifier = Modifier.height(12.dp))
                 Text("HIDEOUT", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black, letterSpacing = 2.sp), color = MaterialTheme.colorScheme.primary)
-                Text("Ver. 2026-10-13", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Ver. 2026-10-25", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
