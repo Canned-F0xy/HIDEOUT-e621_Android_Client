@@ -50,7 +50,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
-import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import coil.ImageLoader
@@ -169,11 +169,8 @@ fun DetailScreen(
             val effectiveVideoQuality = MediaUrlResolver.capForDataSaver(videoQuality, MediaQuality.LOW, DataSaver.shouldSave(context, isDataSaverEnabled))
             val mediaUrl = MediaUrlResolver.videoUrl(post, effectiveVideoQuality) ?: post.file?.url
             if (mediaUrl != null) {
-                val dataSourceFactory = DefaultHttpDataSource.Factory()
+                val dataSourceFactory = OkHttpDataSource.Factory(NetworkModule.client)
                     .setUserAgent(NetworkModule.DEFAULT_USER_AGENT)
-                    .setDefaultRequestProperties(
-                        if (cfClearanceCookie.isNotBlank()) mapOf("Cookie" to cfClearanceCookie) else emptyMap()
-                    )
 
                 val player = ExoPlayer.Builder(context)
                     .setMediaSourceFactory(DefaultMediaSourceFactory(context).setDataSourceFactory(dataSourceFactory))
