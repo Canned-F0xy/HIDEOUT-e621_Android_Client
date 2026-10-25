@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.fragment.app.FragmentActivity
 import com.CannedF0xy.hideout.data.AppPreferences
+import com.CannedF0xy.hideout.data.ViewHistoryStore
 import com.CannedF0xy.hideout.i18n.EnStrings
 import com.CannedF0xy.hideout.i18n.KoStrings
 import com.CannedF0xy.hideout.i18n.LocalStrings
@@ -53,6 +54,7 @@ class MainActivity : FragmentActivity() {
 
     override fun onStop() {
         super.onStop()
+        ViewHistoryStore.flush()
         AppLockManager.onAppBackgrounded()
     }
 
@@ -74,12 +76,13 @@ class MainActivity : FragmentActivity() {
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
 
         val startupPrefs = AppPreferences(applicationContext)
-        val initialLockEnabled = runBlocking { startupPrefs.isAppLockEnabled.first() }
-        val initialPinRecord = runBlocking { startupPrefs.pinRecord.first() }
-        val initialSecureScreen = runBlocking { startupPrefs.isSecureScreen.first() }
-        incognitoActive = runBlocking { startupPrefs.isIncognito.first() }
+        val snapshot = runBlocking { startupPrefs.readStartupSnapshot() }
+        val initialLockEnabled = snapshot.isAppLockEnabled
+        val initialPinRecord = snapshot.pinRecord
+        val initialSecureScreen = snapshot.isSecureScreen
+        incognitoActive = snapshot.isIncognito
         if (incognitoActive && savedInstanceState == null) clearCacheInBackground()
-        val initialStrings = if (runBlocking { startupPrefs.appLanguage.first() } == "en") EnStrings else KoStrings
+        val initialStrings = if (snapshot.appLanguage == "en") EnStrings else KoStrings
 
         if (initialSecureScreen) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         AppLockManager.isEnabled = initialLockEnabled && initialPinRecord.isNotBlank()
@@ -92,8 +95,8 @@ class MainActivity : FragmentActivity() {
             val context = LocalContext.current
             val appPrefs = remember { AppPreferences(context) }
 
-            val isDarkTheme by appPrefs.isDarkTheme.collectAsState(initial = true)
-            val appLanguage by appPrefs.appLanguage.collectAsState(initial = "ko")
+            val isDarkTheme by appPrefs.isDarkTheme.collectAsState(initial = snapshot.isDarkTheme)
+            val appLanguage by appPrefs.appLanguage.collectAsState(initial = snapshot.appLanguage)
             val isAppLockEnabled by appPrefs.isAppLockEnabled.collectAsState(initial = initialLockEnabled)
             val pinRecord by appPrefs.pinRecord.collectAsState(initial = initialPinRecord)
             val isBiometricEnabled by appPrefs.isBiometricEnabled.collectAsState(initial = false)
