@@ -1,5 +1,7 @@
 package com.CannedF0xy.hideout.ui
 
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.background
 import androidx.compose.ui.platform.LocalConfiguration
@@ -291,6 +293,18 @@ fun MainApp(
             .components {
                 if (SDK_INT >= 28) add(ImageDecoderDecoder.Factory()) else add(GifDecoder.Factory())
             }
+            .memoryCache {
+                MemoryCache.Builder(context)
+                    .maxSizePercent(IMAGE_MEMORY_CACHE_PERCENT)
+                    .build()
+            }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(context.cacheDir.resolve("image_cache"))
+                    .maxSizeBytes(IMAGE_DISK_CACHE_BYTES)
+                    .build()
+            }
+            .respectCacheHeaders(false)
             .build()
     }
 
@@ -609,22 +623,29 @@ fun MainApp(
                         isDataSaverEnabled = isDataSaverEnabled
                     )
                 }
-                val openPostFromOverlay: (Post) -> Unit = { post ->
-                    activeOverlay = null
-                    val idQuery = "id:${post.id}"
-                    if (currentTag != idQuery) pushTag(idQuery)
-                }
                 when (activeOverlay) {
                     OverlayKeys.HISTORY -> HistoryScreen(
                         imageLoader = gifEnabledLoader,
                         cfClearanceCookie = cfClearanceCookie,
-                        onOpenPost = openPostFromOverlay,
+                        appPrefs = appPrefs,
+                        isDarkTheme = isDarkTheme,
+                        isAutoPlay = isAutoPlay,
+                        onTagClick = { tag ->
+                            activeOverlay = null
+                            if (tag != currentTag) pushTag(tag)
+                        },
                         onClose = { activeOverlay = null }
                     )
                     OverlayKeys.COLLECTIONS -> CollectionsScreen(
                         imageLoader = gifEnabledLoader,
                         cfClearanceCookie = cfClearanceCookie,
-                        onOpenPost = openPostFromOverlay,
+                        appPrefs = appPrefs,
+                        isDarkTheme = isDarkTheme,
+                        isAutoPlay = isAutoPlay,
+                        onTagClick = { tag ->
+                            activeOverlay = null
+                            if (tag != currentTag) pushTag(tag)
+                        },
                         onClose = { activeOverlay = null }
                     )
                     OverlayKeys.VAULT -> VaultScreen(
@@ -637,6 +658,8 @@ fun MainApp(
     }
 }
 
+private const val IMAGE_MEMORY_CACHE_PERCENT = 0.2
+private const val IMAGE_DISK_CACHE_BYTES = 512L * 1024L * 1024L
 private const val FOLLOW_CHECK_INTERVAL_MS = 30L * 60L * 1000L
 private const val TWO_PANE_MIN_WIDTH_DP = 720
 private const val GALLERY_PANE_WEIGHT = 0.45f
