@@ -1,6 +1,7 @@
 package com.CannedF0xy.hideout.download
 
 import android.content.Context
+import android.os.SystemClock
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.CannedF0xy.hideout.i18n.AppStrings
@@ -46,6 +47,7 @@ data class DownloadTask(
 object DownloadQueue {
     private const val NOTIFICATION_ID = 7101
     private const val BUFFER_SIZE = 64 * 1024
+    private const val PROGRESS_INTERVAL_MS = 300L
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Any()
@@ -58,6 +60,7 @@ object DownloadQueue {
     private var appContext: Context? = null
     private var strings: AppStrings = KoStrings
     private var lastNotifiedPercent = -1
+    private var lastProgressUpdateAt = 0L
 
     fun enqueue(context: Context, request: DownloadRequest, treeUri: String, strings: AppStrings, silent: Boolean): Long {
         return enqueueAll(context, listOf(request), treeUri, strings, silent).first()
@@ -183,9 +186,13 @@ object DownloadQueue {
                         output.write(buffer, 0, read)
                         written += read
                         if (totalBytes > 0) {
-                            val fraction = (written.toFloat() / totalBytes).coerceIn(0f, 1f)
-                            updateTask(task.id) { it.copy(progress = fraction) }
-                            showProgressNotification(context, request.fileName, (fraction * 100).toInt())
+                            val now = SystemClock.elapsedRealtime()
+                            if (now - lastProgressUpdateAt >= PROGRESS_INTERVAL_MS) {
+                                lastProgressUpdateAt = now
+                                val fraction = (written.toFloat() / totalBytes).coerceIn(0f, 1f)
+                                updateTask(task.id) { it.copy(progress = fraction) }
+                                showProgressNotification(context, request.fileName, (fraction * 100).toInt())
+                            }
                         }
                     }
                 }
