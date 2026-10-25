@@ -89,6 +89,19 @@ class AppPreferences(private val context: Context) {
     val savedSearches: Flow<List<SavedSearch>> = context.dataStore.data.map { decodeSavedSearches(it[KEY_SAVED_SEARCHES]) }
     val followedTags: Flow<Map<String, Int>> = context.dataStore.data.map { decodeFollowMap(it[KEY_FOLLOWED_TAGS]) }
 
+    suspend fun readStartupSnapshot(): StartupSnapshot {
+        val data = context.dataStore.data.first()
+        val lockEnabled = data[KEY_APP_LOCK_ENABLED] ?: false
+        return StartupSnapshot(
+            isAppLockEnabled = lockEnabled,
+            pinRecord = if (lockEnabled) CryptoHelper.decrypt(data[KEY_ENC_PIN] ?: "") else "",
+            isSecureScreen = data[KEY_SECURE_SCREEN] ?: false,
+            isIncognito = data[KEY_INCOGNITO] ?: false,
+            appLanguage = data[KEY_APP_LANGUAGE] ?: "ko",
+            isDarkTheme = data[KEY_DARK_THEME] ?: true
+        )
+    }
+
     suspend fun setDarkTheme(value: Boolean) = context.dataStore.edit { it[KEY_DARK_THEME] = value }
     suspend fun setAppLanguage(value: String) = context.dataStore.edit { it[KEY_APP_LANGUAGE] = value }
     suspend fun setAutoPlay(value: Boolean) = context.dataStore.edit { it[KEY_AUTO_PLAY] = value }
@@ -320,4 +333,13 @@ data class ExportSettings(
 data class SavedSearch(
     val name: String,
     val query: String
+)
+
+data class StartupSnapshot(
+    val isAppLockEnabled: Boolean,
+    val pinRecord: String,
+    val isSecureScreen: Boolean,
+    val isIncognito: Boolean,
+    val appLanguage: String,
+    val isDarkTheme: Boolean
 )
