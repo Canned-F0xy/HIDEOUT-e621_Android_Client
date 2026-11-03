@@ -323,7 +323,11 @@ fun DetailScreen(
                             }
                         }
                     } else if (post.file?.url != null || post.sample?.url != null || post.preview?.url != null) {
-                        val effectiveImageQuality = MediaUrlResolver.capForDataSaver(imageQuality, MediaQuality.MEDIUM, isSavingData)
+                        val effectiveImageQuality = if (MediaUrlResolver.isAnimatedImage(post) && !isSavingData) {
+                            MediaQuality.ORIGINAL
+                        } else {
+                            MediaUrlResolver.capForDataSaver(imageQuality, MediaQuality.MEDIUM, isSavingData)
+                        }
                         val imageSource = if (ext == "swf") {
                             (post.sample?.url ?: post.preview?.url)?.let { ImageSource(it, null) }
                         } else {
