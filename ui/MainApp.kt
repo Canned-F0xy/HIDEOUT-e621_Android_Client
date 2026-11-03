@@ -1,5 +1,6 @@
 package com.CannedF0xy.hideout.ui
 
+import com.CannedF0xy.hideout.util.ApngDecoder
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import androidx.compose.ui.unit.dp
@@ -291,6 +292,7 @@ fun MainApp(
         ImageLoader.Builder(context)
             .okHttpClient(NetworkModule.client)
             .components {
+                add(ApngDecoder.Factory())
                 if (SDK_INT >= 28) add(ImageDecoderDecoder.Factory()) else add(GifDecoder.Factory())
             }
             .memoryCache {
