@@ -23,6 +23,14 @@ object MediaUrlResolver {
         return if (isSaving && quality.ordinal < cap.ordinal) cap else quality
     }
 
+    fun isAnimatedImage(post: Post): Boolean {
+        val ext = post.file?.ext?.lowercase() ?: return false
+        if (ext == "gif") return true
+        if (ext != "png" && ext != "webp") return false
+        val tags = post.allTags()
+        return tags.contains("animated") || tags.contains("animated_png") || tags.contains("animated_webp")
+    }
+
     fun imageSource(post: Post, quality: MediaQuality): ImageSource? {
         val original = post.file?.url
         val sample = post.sample?.url
