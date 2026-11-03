@@ -1,6 +1,6 @@
 # 🦊 HIDEOUT (e621 Android Client)
 
-![Version](https://img.shields.io/badge/Version-2026--10--25-FF6B00?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-2026--11--03-FF6B00?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-GPL_3.0-blue?style=for-the-badge)
 ![Android](https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&logo=android&logoColor=white)
 ![Kotlin](https://img.shields.io/badge/Kotlin-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)
@@ -8,8 +8,8 @@
 ![WireGuard](https://img.shields.io/badge/WireGuard-881798?style=for-the-badge&logo=wireguard&logoColor=white)
 ![Downloads](https://img.shields.io/github/downloads/Canned-F0xy/HIDEOUT-e621_Android_Client/total.svg?style=for-the-badge&color=yellow&label=다운로드)
 
-<img width="3350" height="1632" alt="Image" src="https://github.com/user-attachments/assets/9a02bf83-1591-4b99-89ec-c3406d3b2023" />
-<img width="1440" height="4871" alt="Image" src="https://github.com/user-attachments/assets/a4967b32-cbf0-4761-878f-a5888e9c6599" />
+<img width="3686" height="1440" alt="Image" src="https://github.com/user-attachments/assets/0842f7e8-1001-4251-98ce-ad5eec760729" />
+<img width="1440" height="4871" alt="Image" src="https://github.com/user-attachments/assets/8c5d0095-b4d0-40a8-b534-9c9fb3da680d" />
 
 **HIDEOUT**은 제약 없이 안전하게 e621을 탐색할 수 있도록 설계된 최상급 안드로이드 전용 클라이언트 앱입니다.
 
@@ -30,7 +30,7 @@ Along with a trendy UI based on Jetpack Compose, it integrates a **built-in VPN 
 * **강력한 인앱 자체 VPN (In-App VPN):** 외부 VPN 앱 없이 앱 내부에서 암호화 우회 터널을 생성합니다. (설정 파일 및 개인키는 Android KeyStore로 암호화하여 보관합니다.)
   * **Mullvad VPN 자동 연결:** 유료 계정(16자리 숫자)을 입력하면 즉시 일본(JP) 서버로 자동 연결됩니다.
   * **WireGuard `.conf` 업로드:** Proton VPN 등에서 발급한 개인 .conf 파일 등록을 지원합니다.
-  * **VPN 킬스위치:** 내장 VPN이 끊긴 동안 e621 통신을 차단하여 실제 IP 노출을 막습니다.
+  * **VPN 킬스위치:** 내장 VPN이 끊긴 동안 이미지·동영상·다운로드를 포함한 e621 통신을 모두 차단하여 실제 IP 노출을 막습니다.
   * **자동 재연결:** VPN이 예기치 않게 끊기면 자동으로 다시 연결합니다.
 
 * **보안 & 프라이버시 (Security & Privacy):**
@@ -45,13 +45,13 @@ Along with a trendy UI based on Jetpack Compose, it integrates a **built-in VPN 
   * **팔로우 태그 알림:** 팔로우한 태그에 새 포스트가 올라오면 알림으로 알려줍니다.
   * **비슷한 이미지 찾기:** e621 역이미지 검색(IQDB)으로 유사한 포스트를 찾습니다.
   * **태그 정보:** 태그를 길게 누르면 위키 설명과 포스트 수를 확인하고 바로 팔로우·블랙리스트에 추가할 수 있습니다.
-  * **열람 기록 & 로컬 컬렉션:** 최근 본 포스트를 다시 찾고, 로그인 없이 기기 안에 폴더별로 모아둘 수 있습니다.
+  * **열람 기록 & 로컬 컬렉션:** 최근 본 포스트를 다시 찾고, 로그인 없이 기기 안에 폴더별로 모아둘 수 있습니다. 포스트를 누르면 바로 상세 화면이 열리고 좌우로 넘기며 이어서 볼 수 있습니다.
 
-* **미디어 뷰어 & 생태계 연동 (Media Viewer & Ecosystem):** e621 댓글 확인, 묶음 앨범(Pools), 부모/자식(Parent/Child) 연관 포스트를 원클릭으로 모아볼 수 있습니다. Pool 리더 모드로 만화형 콘텐츠를 원래 순서대로 세로 스크롤하며 읽을 수 있고, 내장 WebM/MP4 플레이어(ExoPlayer)는 더블 탭 10초 이동을 지원합니다.
+* **미디어 뷰어 & 생태계 연동 (Media Viewer & Ecosystem):** e621 댓글 확인, 묶음 앨범(Pools), 부모/자식(Parent/Child) 연관 포스트를 원클릭으로 모아볼 수 있습니다. Pool 리더 모드로 만화형 콘텐츠를 원래 순서대로 세로 스크롤하며 읽을 수 있고, 내장 WebM/MP4 플레이어(ExoPlayer)는 더블 탭 10초 이동을 지원합니다. GIF·움직이는 WebP는 물론 **Android가 기본 지원하지 않는 APNG(움직이는 PNG)** 움짤도 화질 설정과 관계없이 원본으로 재생합니다.
 
 * **추천 & 즐겨찾기 연동 (Votes & Favorites):** 상세 화면에서 추천(👍)·비추천(👎)을 할 수 있으며, **추천하면 e621 즐겨찾기에 자동으로 추가**되어 썸네일에 하트가 표시됩니다. e621 계정의 블랙리스트도 앱으로 가져올 수 있습니다.
 
-* **데이터 없는 스마트 캐싱 & 화질 선택 (Smart Caching & Quality):** 한 번 로딩된 미디어는 MD5 해시로 기기에 자동 저장되어 오프라인에서도 감상할 수 있습니다. 이미지·동영상 화질을 각각 **원본/높음/중간/낮음** 중에서 고를 수 있고, **데이터 절약 모드**를 켜면 모바일 데이터에서 자동재생을 끄고 화질을 낮추며 일괄 다운로드를 막습니다. 구형 SWF 플래시 파일은 전용 네온 UI로 대체하여 렌더링합니다.
+* **데이터 없는 스마트 캐싱 & 화질 선택 (Smart Caching & Quality):** 한 번 로딩된 미디어는 MD5 해시로 기기에 자동 저장되고, 최대 512MB의 이미지 캐시로 다시 볼 때는 다운로드 없이 즉시 표시되어 오프라인에서도 감상할 수 있습니다. 이미지·동영상 화질을 각각 **원본/높음/중간/낮음** 중에서 고를 수 있고, **데이터 절약 모드**를 켜면 모바일 데이터에서 자동재생을 끄고 화질을 낮추며 일괄 다운로드를 막습니다. 구형 SWF 플래시 파일은 전용 네온 UI로 대체하여 렌더링합니다.
 
 * **강력한 다운로드 (Powerful Downloads):**
   * **이어받기:** 네트워크가 끊겨도 HTTP Range로 이어서 받으며, 화면에 로딩된 미디어는 데이터 소모 없이 즉시 저장됩니다.
@@ -73,7 +73,7 @@ Along with a trendy UI based on Jetpack Compose, it integrates a **built-in VPN 
 * **Powerful In-App VPN:** Generates an encrypted bypass tunnel directly within the app without needing external VPN apps. (VPN configs and private keys are encrypted with the Android KeyStore.)
   * **Mullvad VPN Auto Connect:** Enter your 16-digit paid account number for a quick automatic connection to a JP server.
   * **WireGuard `.conf` Upload:** Supports uploading personal config files from services like Proton VPN.
-  * **VPN Kill Switch:** Blocks e621 traffic while the in-app VPN is down to prevent exposing your real IP.
+  * **VPN Kill Switch:** Blocks all e621 traffic, including images, videos, and downloads, while the in-app VPN is down to prevent exposing your real IP.
   * **Auto-Reconnect:** Automatically reconnects if the VPN drops unexpectedly.
 
 * **Security & Privacy:**
@@ -88,13 +88,13 @@ Along with a trendy UI based on Jetpack Compose, it integrates a **built-in VPN 
   * **Followed-Tag Notifications:** Get notified when followed tags receive new posts.
   * **Find Similar Images:** Find similar posts using e621's reverse image search (IQDB).
   * **Tag Info:** Long-press a tag to see its wiki and post count, then follow or blacklist it on the spot.
-  * **View History & Local Collections:** Revisit recently viewed posts and organize posts into on-device folders without logging in.
+  * **View History & Local Collections:** Revisit recently viewed posts and organize posts into on-device folders without logging in. Tap a post to open its detail view instantly and swipe through the rest.
 
-* **Media Viewer & Ecosystem Integration:** Read user comments, navigate album Pools, and explore Parent/Child related posts with a single click. Pool Reader Mode lets you read comic-style content vertically in its original order, and the built-in WebM/MP4 ExoPlayer supports double-tap 10-second seeking.
+* **Media Viewer & Ecosystem Integration:** Read user comments, navigate album Pools, and explore Parent/Child related posts with a single click. Pool Reader Mode lets you read comic-style content vertically in its original order, and the built-in WebM/MP4 ExoPlayer supports double-tap 10-second seeking. Animated GIFs and WebPs, as well as **APNGs (animated PNGs) that Android does not natively support**, always play in original quality regardless of your quality setting.
 
 * **Votes & Favorites:** Upvote (👍) or downvote (👎) posts from the detail view. **Upvoting automatically adds the post to your e621 favorites**, marked with a heart on its thumbnail. You can also import your e621 account blacklist.
 
-* **Smart Caching & Quality Selection:** Loaded media is automatically saved via MD5 for offline viewing. Choose image and video quality separately (**Original / High / Medium / Low**), and enable **Data Saver** to disable autoplay, lower quality, and block batch downloads on mobile data. Unsupported legacy SWF files fall back to a custom neon warning UI.
+* **Smart Caching & Quality Selection:** Loaded media is automatically saved via MD5, and a 512MB image cache shows previously viewed images instantly without re-downloading, even offline. Choose image and video quality separately (**Original / High / Medium / Low**), and enable **Data Saver** to disable autoplay, lower quality, and block batch downloads on mobile data. Unsupported legacy SWF files fall back to a custom neon warning UI.
 
 * **Powerful Downloads:**
   * **Resumable:** Continues interrupted downloads via HTTP Range; cached media saves instantly without extra data.
@@ -108,10 +108,10 @@ Along with a trendy UI based on Jetpack Compose, it integrates a **built-in VPN 
 ## 기술 스택 (Tech Stack)
 
 * **UI:** Jetpack Compose, Material Design 3 (Pager, ModalBottomSheet, Adaptive Two-Pane Layout)
-* **Network:** Retrofit2, OkHttp3, Paging 3, Coil (GIF/WebP support, Cloudflare bypass injection)
-* **Media:** AndroidX Media3 (ExoPlayer)
+* **Network:** Retrofit2, OkHttp3, Paging 3, Coil (GIF/WebP/APNG support, Cloudflare bypass injection)
+* **Media:** AndroidX Media3 (ExoPlayer + OkHttp DataSource), APNG4Android
 * **Security:** Android KeyStore (AES/GCM Encryption) + Jetpack DataStore, AndroidX Biometric
-* **Background:** WorkManager (followed-tag checks), FileProvider (in-app updates)
+* **Background & Performance:** WorkManager (followed-tag checks), FileProvider (in-app updates), ProfileInstaller (Baseline Profile)
 * **VPN Core:** `wireguard-android` (wireguard-go JNI wrapper), Android VpnService, Mullvad API
 
 ## 설치 및 사용 방법 (How to Use)
