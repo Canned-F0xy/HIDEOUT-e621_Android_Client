@@ -1,5 +1,7 @@
 package com.CannedF0xy.hideout.ui.components
 
+import androidx.compose.ui.graphics.compositeOver
+import com.CannedF0xy.hideout.ui.theme.readableAccent
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -25,18 +27,21 @@ fun TagSection(
     onTagLongClick: ((String) -> Unit)? = null
 ) {
     if (tags.isNotEmpty()) {
+        val background = MaterialTheme.colorScheme.background
+        val titleColor = readableAccent(color, color.copy(alpha = 0.1f).compositeOver(background))
+        val chipTextColor = readableAccent(color, color.copy(alpha = 0.2f).compositeOver(color.copy(alpha = 0.1f).compositeOver(background)))
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.1f))
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text(title, style = MaterialTheme.typography.labelLarge, color = color, fontWeight = FontWeight.Bold)
+                Text(title, style = MaterialTheme.typography.labelLarge, color = titleColor, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(12.dp))
                 FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     tags.forEach { tag ->
                         Box(modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(color.copy(alpha = 0.2f)).combinedClickable(onClick = { onTagClick(tag) }, onLongClick = onTagLongClick?.let { handler -> { handler(tag) } }).padding(horizontal = 12.dp, vertical = 6.dp)) {
-                            Text(tag, color = color, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                            Text(tag, color = chipTextColor, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
