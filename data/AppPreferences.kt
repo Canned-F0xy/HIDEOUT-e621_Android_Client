@@ -6,6 +6,8 @@ import androidx.compose.runtime.*
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import com.CannedF0xy.hideout.download.FileNameFormatter
+import com.CannedF0xy.hideout.download.apng.ApngExportFormat
+import com.CannedF0xy.hideout.ui.theme.CustomThemeColors
 import com.CannedF0xy.hideout.util.MediaQuality
 import com.google.gson.Gson
 import com.google.gson.JsonParser
@@ -45,6 +47,12 @@ class AppPreferences(private val context: Context) {
         val KEY_INCOGNITO = booleanPreferencesKey("incognito_mode")
         val KEY_DATA_SAVER = booleanPreferencesKey("data_saver_mode")
         val KEY_IMAGE_QUALITY = stringPreferencesKey("image_quality")
+        val KEY_APNG_EXPORT_FORMAT = stringPreferencesKey("apng_export_format")
+        val KEY_CUSTOM_THEME_ENABLED = booleanPreferencesKey("custom_theme_enabled")
+        val KEY_THEME_ACCENT = intPreferencesKey("theme_accent")
+        val KEY_THEME_BACKGROUND = intPreferencesKey("theme_background")
+        val KEY_THEME_SURFACE = intPreferencesKey("theme_surface")
+        val KEY_THEME_TEXT = intPreferencesKey("theme_text")
         val KEY_VIDEO_QUALITY = stringPreferencesKey("video_quality")
         val KEY_FILENAME_TEMPLATE = stringPreferencesKey("filename_template")
         val KEY_SAVED_SEARCHES = stringPreferencesKey("saved_searches")
@@ -83,6 +91,8 @@ class AppPreferences(private val context: Context) {
         else if (it[KEY_ORIGINAL_QUALITY] == false) MediaQuality.HIGH
         else MediaQuality.DEFAULT
     }
+    val customTheme: Flow<CustomThemeColors> = context.dataStore.data.map { readCustomTheme(it) }
+    val apngExportFormat: Flow<ApngExportFormat> = context.dataStore.data.map { ApngExportFormat.fromKey(it[KEY_APNG_EXPORT_FORMAT]) }
     val videoQuality: Flow<MediaQuality> = context.dataStore.data.map { MediaQuality.fromKey(it[KEY_VIDEO_QUALITY]) }
     val isDataSaverEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_DATA_SAVER] ?: false }
     val fileNameTemplate: Flow<String> = context.dataStore.data.map { it[KEY_FILENAME_TEMPLATE] ?: FileNameFormatter.DEFAULT_TEMPLATE }
@@ -98,7 +108,8 @@ class AppPreferences(private val context: Context) {
             isSecureScreen = data[KEY_SECURE_SCREEN] ?: false,
             isIncognito = data[KEY_INCOGNITO] ?: false,
             appLanguage = data[KEY_APP_LANGUAGE] ?: "ko",
-            isDarkTheme = data[KEY_DARK_THEME] ?: true
+            isDarkTheme = data[KEY_DARK_THEME] ?: true,
+            customTheme = readCustomTheme(data)
         )
     }
 
@@ -141,6 +152,27 @@ class AppPreferences(private val context: Context) {
     }
 
     suspend fun setImageQuality(value: MediaQuality) = context.dataStore.edit { it[KEY_IMAGE_QUALITY] = value.key }
+    suspend fun setCustomThemeEnabled(value: Boolean) = context.dataStore.edit { it[KEY_CUSTOM_THEME_ENABLED] = value }
+    suspend fun setThemeAccent(value: Int?) = context.dataStore.edit { if (value == null) it.remove(KEY_THEME_ACCENT) else it[KEY_THEME_ACCENT] = value }
+    suspend fun setThemeBackground(value: Int?) = context.dataStore.edit { if (value == null) it.remove(KEY_THEME_BACKGROUND) else it[KEY_THEME_BACKGROUND] = value }
+    suspend fun setThemeSurface(value: Int?) = context.dataStore.edit { if (value == null) it.remove(KEY_THEME_SURFACE) else it[KEY_THEME_SURFACE] = value }
+    suspend fun resetCustomThemeColors() = context.dataStore.edit {
+        it.remove(KEY_THEME_ACCENT)
+        it.remove(KEY_THEME_BACKGROUND)
+        it.remove(KEY_THEME_SURFACE)
+        it.remove(KEY_THEME_TEXT)
+    }
+    suspend fun setThemeText(value: Int?) = context.dataStore.edit { if (value == null) it.remove(KEY_THEME_TEXT) else it[KEY_THEME_TEXT] = value }
+
+    private fun readCustomTheme(data: Preferences) = CustomThemeColors(
+        enabled = data[KEY_CUSTOM_THEME_ENABLED] ?: false,
+        accent = data[KEY_THEME_ACCENT],
+        background = data[KEY_THEME_BACKGROUND],
+        surface = data[KEY_THEME_SURFACE],
+        text = data[KEY_THEME_TEXT]
+    )
+
+    suspend fun setApngExportFormat(value: ApngExportFormat) = context.dataStore.edit { it[KEY_APNG_EXPORT_FORMAT] = value.key }
     suspend fun setVideoQuality(value: MediaQuality) = context.dataStore.edit { it[KEY_VIDEO_QUALITY] = value.key }
     suspend fun setDataSaver(value: Boolean) = context.dataStore.edit { it[KEY_DATA_SAVER] = value }
     suspend fun setFileNameTemplate(value: String) = context.dataStore.edit { it[KEY_FILENAME_TEMPLATE] = value }
@@ -260,6 +292,12 @@ class AppPreferences(private val context: Context) {
             dataSaver = data[KEY_DATA_SAVER] ?: false,
             imageQuality = data[KEY_IMAGE_QUALITY] ?: MediaQuality.DEFAULT.key,
             videoQuality = data[KEY_VIDEO_QUALITY] ?: MediaQuality.DEFAULT.key,
+            apngExportFormat = data[KEY_APNG_EXPORT_FORMAT] ?: ApngExportFormat.DEFAULT.key,
+            customThemeEnabled = data[KEY_CUSTOM_THEME_ENABLED] ?: false,
+            themeAccent = data[KEY_THEME_ACCENT],
+            themeBackground = data[KEY_THEME_BACKGROUND],
+            themeSurface = data[KEY_THEME_SURFACE],
+            themeText = data[KEY_THEME_TEXT],
             fileNameTemplate = data[KEY_FILENAME_TEMPLATE] ?: FileNameFormatter.DEFAULT_TEMPLATE,
             savedSearches = decodeSavedSearches(data[KEY_SAVED_SEARCHES]),
             collections = CollectionStore.snapshot(context)
@@ -294,6 +332,12 @@ class AppPreferences(private val context: Context) {
                 importObj.dataSaver?.let { v -> it[KEY_DATA_SAVER] = v }
                 importObj.imageQuality?.let { v -> it[KEY_IMAGE_QUALITY] = MediaQuality.fromKey(v).key }
                 importObj.videoQuality?.let { v -> it[KEY_VIDEO_QUALITY] = MediaQuality.fromKey(v).key }
+                importObj.apngExportFormat?.let { v -> it[KEY_APNG_EXPORT_FORMAT] = ApngExportFormat.fromKey(v).key }
+                importObj.customThemeEnabled?.let { v -> it[KEY_CUSTOM_THEME_ENABLED] = v }
+                importObj.themeAccent?.let { v -> it[KEY_THEME_ACCENT] = v }
+                importObj.themeBackground?.let { v -> it[KEY_THEME_BACKGROUND] = v }
+                importObj.themeSurface?.let { v -> it[KEY_THEME_SURFACE] = v }
+                importObj.themeText?.let { v -> it[KEY_THEME_TEXT] = v }
                 importObj.fileNameTemplate?.let { v -> it[KEY_FILENAME_TEMPLATE] = v }
                 importObj.savedSearches?.let { v ->
                     val existing = decodeSavedSearches(it[KEY_SAVED_SEARCHES])
@@ -325,6 +369,12 @@ data class ExportSettings(
     val dataSaver: Boolean? = null,
     val imageQuality: String? = null,
     val videoQuality: String? = null,
+    val apngExportFormat: String? = null,
+    val customThemeEnabled: Boolean? = null,
+    val themeAccent: Int? = null,
+    val themeBackground: Int? = null,
+    val themeSurface: Int? = null,
+    val themeText: Int? = null,
     val fileNameTemplate: String? = null,
     val savedSearches: List<SavedSearch>? = null,
     val collections: List<LocalCollection>? = null
@@ -341,5 +391,6 @@ data class StartupSnapshot(
     val isSecureScreen: Boolean,
     val isIncognito: Boolean,
     val appLanguage: String,
-    val isDarkTheme: Boolean
+    val isDarkTheme: Boolean,
+    val customTheme: CustomThemeColors
 )
