@@ -7,6 +7,7 @@ import com.CannedF0xy.hideout.i18n.AppStrings
 import com.CannedF0xy.hideout.i18n.EnStrings
 import com.CannedF0xy.hideout.i18n.KoStrings
 import com.CannedF0xy.hideout.network.NetworkModule
+import com.CannedF0xy.hideout.network.getPosts
 import com.CannedF0xy.hideout.network.SearchQueryBuilder
 import com.CannedF0xy.hideout.notification.NotificationHelper
 import kotlinx.coroutines.Dispatchers
