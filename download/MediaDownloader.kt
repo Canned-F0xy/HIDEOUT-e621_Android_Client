@@ -8,14 +8,7 @@ import android.os.Build.VERSION_CODES
 import android.os.Environment
 import android.widget.Toast
 import com.CannedF0xy.hideout.i18n.AppStrings
-import com.CannedF0xy.hideout.network.NetworkModule
-import com.CannedF0xy.hideout.util.getCachedFile
 import java.io.File
-import java.io.FileOutputStream
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 internal fun saveFileToStorage(context: Context, sourceFile: File, fileName: String, treeUriStr: String) {
     if (treeUriStr == VaultStore.TARGET) {
@@ -82,21 +75,6 @@ fun downloadMediaWithRange(
     cfClearanceCookie: String,
     strings: AppStrings
 ) {
-    if (!md5.isNullOrBlank()) {
-        val cached = getCachedFile(context, md5, ext)
-        if (cached != null) {
-            CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    saveFileToStorage(context, cached, fileName, treeUriStr)
-                    withContext(Dispatchers.Main) { Toast.makeText(context, strings.downloadComplete, Toast.LENGTH_SHORT).show() }
-                } catch (e: Exception) {
-                    withContext(Dispatchers.Main) { Toast.makeText(context, strings.downloadFailed(e.localizedMessage ?: ""), Toast.LENGTH_SHORT).show() }
-                }
-            }
-            return
-        }
-    }
-
     Toast.makeText(context, strings.downloadStarting, Toast.LENGTH_SHORT).show()
     DownloadQueue.enqueue(
         context = context,
