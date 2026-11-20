@@ -55,9 +55,25 @@ fun SettingsSheet(
             Text(strings.appSettings, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(24.dp))
 
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onThemeToggle() }.padding(vertical = 8.dp)) {
-                Text(strings.useDarkTheme, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
-                Switch(checked = isDarkTheme, onCheckedChange = { onThemeToggle() }, colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary, checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)))
+            val customThemeFlow = remember(appPrefs) { appPrefs?.customTheme }
+            val customThemeState = customThemeFlow?.collectAsState(initial = null)
+            val isDarkThemeLocked = customThemeState?.value?.enabled == true
+
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable(enabled = !isDarkThemeLocked) { onThemeToggle() }.padding(vertical = 8.dp)) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(strings.useDarkTheme, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (isDarkThemeLocked) 0.38f else 1f), fontWeight = FontWeight.SemiBold)
+                    if (isDarkThemeLocked) {
+                        Text(strings.darkThemeLockedByCustom, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                    }
+                }
+                if (isDarkThemeLocked) {
+                    Icon(Icons.Default.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = 8.dp).size(18.dp))
+                }
+                Switch(checked = isDarkTheme, onCheckedChange = { if (!isDarkThemeLocked) onThemeToggle() }, enabled = !isDarkThemeLocked, colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary, checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)))
+            }
+
+            if (appPrefs != null) {
+                ThemeSettingsSection(appPrefs = appPrefs)
             }
 
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onAutoPlayToggle() }.padding(vertical = 8.dp)) {
