@@ -1,6 +1,7 @@
 package com.CannedF0xy.hideout.download
 
 import com.CannedF0xy.hideout.network.NetworkModule
+import com.CannedF0xy.hideout.network.getPosts
 import com.CannedF0xy.hideout.network.SearchQueryBuilder
 import com.CannedF0xy.hideout.network.model.Post
 import kotlinx.coroutines.Dispatchers
