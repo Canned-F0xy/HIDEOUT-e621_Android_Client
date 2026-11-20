@@ -3,6 +3,7 @@ package com.CannedF0xy.hideout.ui.screens.gallery
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.background
+import com.CannedF0xy.hideout.download.apng.ApngExportFormat
 import com.CannedF0xy.hideout.util.MediaQuality
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
@@ -48,6 +49,7 @@ fun AdvancedSettingsSection(appPrefs: AppPreferences) {
     val isSecureScreen by appPrefs.isSecureScreen.collectAsState(initial = false)
     val imageQuality by appPrefs.imageQuality.collectAsState(initial = MediaQuality.DEFAULT)
     val videoQuality by appPrefs.videoQuality.collectAsState(initial = MediaQuality.DEFAULT)
+    val apngExportFormat by appPrefs.apngExportFormat.collectAsState(initial = ApngExportFormat.DEFAULT)
     val downloadTreeUri by appPrefs.downloadTreeUri.collectAsState(initial = "")
     val isKillSwitchEnabled by appPrefs.isKillSwitchEnabled.collectAsState(initial = false)
     val isDataSaverEnabled by appPrefs.isDataSaverEnabled.collectAsState(initial = false)
@@ -80,6 +82,13 @@ fun AdvancedSettingsSection(appPrefs: AppPreferences) {
             description = strings.videoQualityDescription,
             selected = videoQuality,
             onSelect = { quality -> scope.launch { appPrefs.setVideoQuality(quality) } }
+        )
+        ChoiceRow(
+            title = strings.apngFormatTitle,
+            description = strings.apngFormatDescription,
+            options = ApngExportFormat.entries.map { it to strings.apngFormatLabel(it.key) },
+            selected = apngExportFormat,
+            onSelect = { format -> scope.launch { appPrefs.setApngExportFormat(format) } }
         )
         SettingSwitchRow(
             title = strings.dataSaverTitle,
@@ -180,6 +189,23 @@ private fun QualitySelectorRow(
     onSelect: (MediaQuality) -> Unit
 ) {
     val strings = LocalStrings.current
+    ChoiceRow(
+        title = title,
+        description = description,
+        options = MediaQuality.entries.map { it to strings.qualityLabel(it.key) },
+        selected = selected,
+        onSelect = onSelect
+    )
+}
+
+@Composable
+private fun <T> ChoiceRow(
+    title: String,
+    description: String,
+    options: List<Pair<T, String>>,
+    selected: T,
+    onSelect: (T) -> Unit
+) {
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
         Text(title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
         Text(description, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
@@ -187,8 +213,8 @@ private fun QualitySelectorRow(
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            MediaQuality.entries.forEach { quality ->
-                val isSelected = quality == selected
+            options.forEach { (value, label) ->
+                val isSelected = value == selected
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -196,12 +222,12 @@ private fun QualitySelectorRow(
                             if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant,
                             RoundedCornerShape(12.dp)
                         )
-                        .clickable { onSelect(quality) }
+                        .clickable { onSelect(value) }
                         .padding(vertical = 10.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        strings.qualityLabel(quality.key),
+                        label,
                         fontSize = 13.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                         color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
