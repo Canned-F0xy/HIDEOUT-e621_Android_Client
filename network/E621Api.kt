@@ -1,7 +1,6 @@
 package com.CannedF0xy.hideout.network
 
 import com.CannedF0xy.hideout.network.model.AutocompleteTag
-import com.CannedF0xy.hideout.network.model.E621Response
 import com.CannedF0xy.hideout.network.model.Pool
 import com.CannedF0xy.hideout.network.model.VoteResponse
 import com.CannedF0xy.hideout.vpn.VpnBlockedException
@@ -18,11 +17,12 @@ import retrofit2.http.*
 
 interface E621ApiService {
     @GET("posts.json")
-    suspend fun getPosts(
+    suspend fun getPostsRaw(
         @Query("tags") tags: String,
         @Query("limit") limit: Int = 20,
-        @Query("page") page: Int = 1
-    ): E621Response
+        @Query("page") page: Int = 1,
+        @Query("v1") legacyFormat: Boolean = true
+    ): ResponseBody
 
     @GET("tags/autocomplete.json")
     suspend fun getAutocomplete(@Query("search[name_matches]") query: String): List<AutocompleteTag>
