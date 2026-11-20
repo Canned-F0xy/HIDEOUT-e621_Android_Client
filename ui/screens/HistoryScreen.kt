@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import coil.ImageLoader
+import com.CannedF0xy.hideout.data.AppPreferences
 import com.CannedF0xy.hideout.data.ViewHistoryStore
 import com.CannedF0xy.hideout.i18n.LocalStrings
 import com.CannedF0xy.hideout.network.model.Post
@@ -33,7 +34,10 @@ import kotlinx.coroutines.launch
 fun HistoryScreen(
     imageLoader: ImageLoader,
     cfClearanceCookie: String,
-    onOpenPost: (Post) -> Unit,
+    appPrefs: AppPreferences,
+    isDarkTheme: Boolean,
+    isAutoPlay: Boolean,
+    onTagClick: (String) -> Unit,
     onClose: () -> Unit
 ) {
     val strings = LocalStrings.current
@@ -41,6 +45,8 @@ fun HistoryScreen(
     val scope = rememberCoroutineScope()
     val posts by ViewHistoryStore.posts.collectAsState()
     var confirmClear by remember { mutableStateOf(false) }
+    var viewerPosts by remember { mutableStateOf<List<Post>?>(null) }
+    var viewerStartIndex by remember { mutableStateOf(0) }
 
     LaunchedEffect(Unit) { ViewHistoryStore.ensureLoaded(context) }
 
@@ -81,10 +87,32 @@ fun HistoryScreen(
                 posts = posts,
                 imageLoader = imageLoader,
                 cfClearanceCookie = cfClearanceCookie,
-                onPostClick = onOpenPost,
+                onPostClick = { post ->
+                    val snapshot = posts
+                    viewerStartIndex = snapshot.indexOfFirst { it.id == post.id }.coerceAtLeast(0)
+                    viewerPosts = snapshot
+                },
                 onRemove = { post -> scope.launch { ViewHistoryStore.remove(context, post.id) } },
                 removeDescription = strings.cdDelete
             )
         }
+    }
+
+    val openedPosts = viewerPosts
+    if (openedPosts != null && openedPosts.isNotEmpty()) {
+        ListDetailPagerScreen(
+            posts = openedPosts,
+            initialIndex = viewerStartIndex,
+            appPrefs = appPrefs,
+            isDarkTheme = isDarkTheme,
+            isAutoPlay = isAutoPlay,
+            gifEnabledLoader = imageLoader,
+            cfClearanceCookie = cfClearanceCookie,
+            onClose = { viewerPosts = null },
+            onTagClick = { tag ->
+                viewerPosts = null
+                onTagClick(tag)
+            }
+        )
     }
 }
