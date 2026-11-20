@@ -4,6 +4,9 @@ import android.content.Context
 import android.os.SystemClock
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import com.CannedF0xy.hideout.data.AppPreferences
+import com.CannedF0xy.hideout.download.apng.ApngConverter
+import com.CannedF0xy.hideout.download.apng.ApngExportFormat
 import com.CannedF0xy.hideout.i18n.AppStrings
 import com.CannedF0xy.hideout.i18n.KoStrings
 import com.CannedF0xy.hideout.network.NetworkModule
@@ -21,6 +24,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -48,6 +52,7 @@ object DownloadQueue {
     private const val NOTIFICATION_ID = 7101
     private const val BUFFER_SIZE = 64 * 1024
     private const val PROGRESS_INTERVAL_MS = 300L
+    private const val CONVERT_DIR = "apng_convert"
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Any()
@@ -132,11 +137,12 @@ object DownloadQueue {
         showProgressNotification(context, request.fileName, 0)
 
         try {
+            val apngFormat = AppPreferences(context).apngExportFormat.first()
             val cached = getCachedFile(context, request.md5, request.ext)
             if (cached != null) {
-                saveFileToStorage(context, cached, request.fileName, task.treeUri)
+                saveConverted(context, cached, request.fileName, task.treeUri, apngFormat)
             } else {
-                downloadToStorage(context, task)
+                downloadToStorage(context, task, apngFormat)
             }
             updateTask(task.id) { it.copy(status = DownloadStatus.DONE, progress = 1f) }
             if (!task.silent) toast(context, strings.downloadComplete)
@@ -149,7 +155,7 @@ object DownloadQueue {
         }
     }
 
-    private fun downloadToStorage(context: Context, task: DownloadTask) {
+    private fun downloadToStorage(context: Context, task: DownloadTask, apngFormat: ApngExportFormat) {
         val request = task.request
         val tempKey = request.md5?.takeIf { it.isNotBlank() } ?: request.fileName
         val tempFile = File(context.cacheDir, "temp_${tempKey}.${request.ext}")
@@ -199,7 +205,7 @@ object DownloadQueue {
             }
         }
 
-        saveFileToStorage(context, tempFile, request.fileName, task.treeUri)
+        saveConverted(context, tempFile, request.fileName, task.treeUri, apngFormat)
 
         if (!request.md5.isNullOrBlank()) {
             val cacheDir = File(context.cacheDir, "e621_media_cache")
@@ -207,6 +213,19 @@ object DownloadQueue {
             tempFile.copyTo(File(cacheDir, "${request.md5}.${request.ext}"), overwrite = true)
         }
         tempFile.delete()
+    }
+
+    private fun saveConverted(context: Context, source: File, fileName: String, treeUri: String, apngFormat: ApngExportFormat) {
+        val converted = ApngConverter.convertIfNeeded(source, fileName, apngFormat, File(context.cacheDir, CONVERT_DIR))
+        if (converted == null) {
+            saveFileToStorage(context, source, fileName, treeUri)
+            return
+        }
+        try {
+            saveFileToStorage(context, converted.file, converted.fileName, treeUri)
+        } finally {
+            converted.file.delete()
+        }
     }
 
     private fun showProgressNotification(context: Context, fileName: String, percent: Int) {
