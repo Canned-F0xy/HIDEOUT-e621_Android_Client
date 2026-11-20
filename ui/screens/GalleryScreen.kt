@@ -1,5 +1,8 @@
 package com.CannedF0xy.hideout.ui.screens
 
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import com.CannedF0xy.hideout.util.MediaUrlResolver
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import com.CannedF0xy.hideout.ui.screens.gallery.SelectionActionBar
@@ -39,7 +42,6 @@ import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -206,6 +208,31 @@ fun GalleryScreen(
         }
     }
 
+    val searchFieldState = rememberTextFieldState(searchInput.text, searchInput.selection)
+    val lastSyncedSearch = remember { arrayOf(searchInput) }
+    val latestOnSearchInputChange by rememberUpdatedState(onSearchInputChange)
+
+    LaunchedEffect(searchInput) {
+        if (searchInput == lastSyncedSearch[0]) return@LaunchedEffect
+        lastSyncedSearch[0] = searchInput
+        if (searchFieldState.text.toString() != searchInput.text || searchFieldState.selection != searchInput.selection) {
+            searchFieldState.edit {
+                if (toString() != searchInput.text) replace(0, length, searchInput.text)
+                selection = TextRange(searchInput.selection.start.coerceIn(0, length), searchInput.selection.end.coerceIn(0, length))
+            }
+        }
+    }
+
+    LaunchedEffect(searchFieldState) {
+        snapshotFlow { TextFieldValue(searchFieldState.text.toString(), searchFieldState.selection) }.collect { value ->
+            val previous = lastSyncedSearch[0]
+            if (previous.text != value.text || previous.selection != value.selection) {
+                lastSyncedSearch[0] = value
+                latestOnSearchInputChange(value)
+            }
+        }
+    }
+
     val nestedScrollConnection = remember {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
@@ -320,6 +347,7 @@ fun GalleryScreen(
 
     ModalNavigationDrawer(
         drawerState = drawerState,
+        gesturesEnabled = drawerState.isOpen || !isSearchFocused,
         drawerContent = {
             GalleryDrawerContent(
                 loginUsername = loginUsername,
@@ -355,7 +383,6 @@ fun GalleryScreen(
                     .fillMaxSize()
                     .padding(innerPadding)
                     .nestedScroll(nestedScrollConnection)
-                    .pointerInput(Unit) { detectTapGestures(onTap = { focusManager.clearFocus(force = true); keyboardController?.hide() }) }
             ) {
                 Box(modifier = Modifier.size(0.dp).focusRequester(focusRequester).focusable())
 
@@ -373,6 +400,7 @@ fun GalleryScreen(
 
                 Box(modifier = Modifier.fillMaxSize()) {
                     Box(modifier = Modifier.fillMaxSize()
+                        .pointerInput(Unit) { detectTapGestures(onTap = { focusManager.clearFocus(force = true); keyboardController?.hide() }) }
                         .pointerInput(Unit) {
                             awaitPointerEventScope {
                                 while (true) {
@@ -449,7 +477,7 @@ fun GalleryScreen(
                                         val md5 = post.file?.md5 ?: ""
                                         val cachedFile = getCachedFile(context, md5, ext)
 
-                                        val imageModel = if (ext == "swf") {
+                                        val imageModel = if (ext == "swf" || MediaUrlResolver.hasMotion(post)) {
                                             post.preview?.url ?: post.sample?.url
                                         } else {
                                             cachedFile ?: post.preview?.url ?: post.sample?.url ?: post.file?.url
@@ -504,7 +532,7 @@ fun GalleryScreen(
 
                                                 if (ext.isNotBlank()) {
                                                     Box(modifier = Modifier.align(Alignment.BottomStart).padding(6.dp).background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                                                        Text(ext.uppercase(), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                        Text(MediaUrlResolver.displayExtension(post).uppercase(), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                                     }
                                                 }
 
@@ -558,7 +586,12 @@ fun GalleryScreen(
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                IconButton(onClick = {
+                                    expanded = false
+                                    focusManager.clearFocus(force = true)
+                                    keyboardController?.hide()
+                                    scope.launch { drawerState.open() }
+                                }) {
                                     Icon(Icons.Default.Menu, contentDescription = strings.cdOpenMenu, tint = MaterialTheme.colorScheme.primary)
                                 }
 
@@ -569,8 +602,7 @@ fun GalleryScreen(
                                 }
 
                                 TextField(
-                                    value = searchInput,
-                                    onValueChange = onSearchInputChange,
+                                    state = searchFieldState,
                                     modifier = Modifier.weight(1f).onFocusChanged { focusState -> isSearchFocused = focusState.isFocused },
                                     placeholder = {
                                         Text(
@@ -580,9 +612,17 @@ fun GalleryScreen(
                                             fontSize = 14.sp
                                         )
                                     },
-                                    singleLine = true,
+                                    lineLimits = TextFieldLineLimits.SingleLine,
                                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                                    keyboardActions = KeyboardActions(onSearch = { expanded = false; onSearch(); focusManager.clearFocus(force = true); keyboardController?.hide() }),
+                                    onKeyboardAction = {
+                                        val submitted = TextFieldValue(searchFieldState.text.toString(), searchFieldState.selection)
+                                        lastSyncedSearch[0] = submitted
+                                        onSearchInputChange(submitted)
+                                        expanded = false
+                                        onSearch()
+                                        focusManager.clearFocus(force = true)
+                                        keyboardController?.hide()
+                                    },
                                     colors = TextFieldDefaults.colors(
                                         focusedContainerColor = Color.Transparent,
                                         unfocusedContainerColor = Color.Transparent,
