@@ -1,5 +1,6 @@
 package com.CannedF0xy.hideout
 
+import com.CannedF0xy.hideout.ui.theme.LocalCustomThemeEnabled
 import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
@@ -21,8 +22,7 @@ import com.CannedF0xy.hideout.security.AppLockManager
 import com.CannedF0xy.hideout.security.LockScreen
 import com.CannedF0xy.hideout.ui.MainApp
 import com.CannedF0xy.hideout.ui.navigation.PendingNavigation
-import com.CannedF0xy.hideout.ui.theme.HideoutDarkTheme
-import com.CannedF0xy.hideout.ui.theme.HideoutLightTheme
+import com.CannedF0xy.hideout.ui.theme.HideoutThemeBuilder
 import com.CannedF0xy.hideout.vpn.VpnCleanupService
 import com.CannedF0xy.hideout.vpn.VpnManager
 import kotlinx.coroutines.DelicateCoroutinesApi
@@ -96,6 +96,7 @@ class MainActivity : FragmentActivity() {
             val appPrefs = remember { AppPreferences(context) }
 
             val isDarkTheme by appPrefs.isDarkTheme.collectAsState(initial = snapshot.isDarkTheme)
+            val customTheme by appPrefs.customTheme.collectAsState(initial = snapshot.customTheme)
             val appLanguage by appPrefs.appLanguage.collectAsState(initial = snapshot.appLanguage)
             val isAppLockEnabled by appPrefs.isAppLockEnabled.collectAsState(initial = initialLockEnabled)
             val pinRecord by appPrefs.pinRecord.collectAsState(initial = initialPinRecord)
@@ -116,9 +117,9 @@ class MainActivity : FragmentActivity() {
             }
 
             val currentStrings = if (appLanguage == "en") EnStrings else KoStrings
-            val colorScheme = if (isDarkTheme) HideoutDarkTheme else HideoutLightTheme
+            val colorScheme = remember(isDarkTheme, customTheme) { HideoutThemeBuilder.build(isDarkTheme, customTheme) }
 
-            CompositionLocalProvider(LocalStrings provides currentStrings) {
+            CompositionLocalProvider(LocalStrings provides currentStrings, LocalCustomThemeEnabled provides customTheme.enabled) {
                 MaterialTheme(colorScheme = colorScheme) {
                     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                         Box(modifier = Modifier.fillMaxSize()) {
