@@ -65,6 +65,7 @@ import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -569,7 +570,7 @@ fun MainApp(
                                 scope.launch { appPrefs.setSearchStack(Gson().toJson(newStack)) }
                             },
                             isDarkTheme = isDarkTheme,
-                            onThemeToggle = { scope.launch { appPrefs.setDarkTheme(!isDarkTheme) } },
+                            onThemeToggle = { scope.launch { if (!appPrefs.customTheme.first().enabled) appPrefs.setDarkTheme(!isDarkTheme) } },
                             isNsfwEnabled = isNsfwEnabled,
                             onNsfwToggle = { scope.launch { appPrefs.setNsfwEnabled(!isNsfwEnabled) } },
                             isAutoPlay = isAutoPlay,
