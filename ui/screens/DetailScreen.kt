@@ -1,5 +1,11 @@
 package com.CannedF0xy.hideout.ui.screens
 
+import com.CannedF0xy.hideout.ui.components.DTextView
+import com.CannedF0xy.hideout.ui.theme.readableAccent
+import com.CannedF0xy.hideout.ui.theme.LocalCustomThemeEnabled
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import com.CannedF0xy.hideout.download.apng.ApngConverter
 import com.CannedF0xy.hideout.util.ImageSource
 import com.CannedF0xy.hideout.util.MediaUrlResolver
 import com.CannedF0xy.hideout.util.MediaQuality
@@ -69,7 +75,6 @@ import com.CannedF0xy.hideout.ui.components.CommentsSection
 import com.CannedF0xy.hideout.ui.components.TagSection
 import com.CannedF0xy.hideout.ui.components.VideoPlayer
 import com.CannedF0xy.hideout.ui.components.ZoomableImage
-import com.CannedF0xy.hideout.ui.theme.NeonOrange
 import com.CannedF0xy.hideout.util.getCachedFile
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -161,6 +166,13 @@ fun DetailScreen(
     val ext = post.file?.ext ?: ""
     val md5 = post.file?.md5 ?: ""
     val cachedFile = getCachedFile(context, md5, ext)
+    var isApngFile by remember(post.id) { mutableStateOf(false) }
+    LaunchedEffect(post.id, cachedFile?.path) {
+        if (ext.equals("png", ignoreCase = true) && cachedFile != null) {
+            isApngFile = withContext(Dispatchers.IO) { ApngConverter.isApng(cachedFile) }
+        }
+    }
+    val displayExt = MediaUrlResolver.displayExtension(post, isApngFile)
 
     var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
 
@@ -299,10 +311,10 @@ fun DetailScreen(
                             )
                             Text(
                                 text = strings.unsupportedSwf,
-                                color = NeonOrange,
+                                color = MaterialTheme.colorScheme.primary,
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     shadow = androidx.compose.ui.graphics.Shadow(
-                                        color = NeonOrange.copy(alpha = 0.6f),
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
                                         offset = Offset(0f, 0f),
                                         blurRadius = 16f
                                     )
@@ -440,7 +452,7 @@ fun DetailScreen(
                         ) {
                             Row(modifier = Modifier.fillMaxSize().padding(start = 20.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
-                                    Text(strings.fileLabel(ext.uppercase()), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(strings.fileLabel(displayExt.uppercase()), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Text(strings.scoreLabel(LocalPostManager.getScore(post)), fontSize = 20.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                                 }
                                 val myVote = LocalPostManager.getVote(post)
@@ -505,7 +517,7 @@ fun DetailScreen(
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text(strings.descLabel, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 8.dp))
-                                Text(post.description, color = MaterialTheme.colorScheme.onBackground, fontSize = 14.sp)
+                                DTextView(text = post.description, color = MaterialTheme.colorScheme.onBackground, fontSize = 14.sp, background = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), onSearch = onTagClick)
                             }
                         }
                     }
@@ -522,11 +534,11 @@ fun DetailScreen(
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha=0.5f))
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
-                                Text(strings.sourcesLabel, fontWeight = FontWeight.Bold, color = if (isDarkTheme) Color.White else Color.Black, modifier = Modifier.padding(bottom = 8.dp))
+                                Text(strings.sourcesLabel, fontWeight = FontWeight.Bold, color = if (LocalCustomThemeEnabled.current) readableAccent(MaterialTheme.colorScheme.onBackground, MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)) else if (isDarkTheme) Color.White else Color.Black, modifier = Modifier.padding(bottom = 8.dp))
                                 post.sources.forEach { sourceUrl ->
                                     Text(
                                         text = sourceUrl,
-                                        color = Color(0xFF40C4FF),
+                                        color = readableAccent(Color(0xFF40C4FF), MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
                                         fontSize = 13.sp,
                                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
                                             try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(sourceUrl))) } catch(e:Exception){}
@@ -537,7 +549,7 @@ fun DetailScreen(
                         }
                     }
 
-                    CommentsSection(postId = post.id)
+                    CommentsSection(postId = post.id, onSearch = onTagClick)
 
                     Spacer(modifier = Modifier.height(40.dp))
                 }
