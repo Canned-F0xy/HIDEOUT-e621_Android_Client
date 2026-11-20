@@ -26,7 +26,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-fun CommentsSection(postId: Int) {
+fun CommentsSection(postId: Int, onSearch: ((String) -> Unit)? = null) {
     val context = LocalContext.current
     val strings = LocalStrings.current
     var comments by remember(postId) { mutableStateOf<List<Comment>?>(null) }
@@ -98,7 +98,7 @@ fun CommentsSection(postId: Int) {
                                         Text("⭐ ${comment.score}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                                     }
                                     Spacer(modifier = Modifier.height(4.dp))
-                                    Text(comment.body ?: "", color = MaterialTheme.colorScheme.onBackground, fontSize = 13.sp)
+                                    DTextView(text = comment.body ?: "", color = MaterialTheme.colorScheme.onBackground, fontSize = 13.sp, background = MaterialTheme.colorScheme.surface, onSearch = onSearch)
                                 }
                             }
                         }
