@@ -263,6 +263,26 @@ interface AppStrings {
     val videoQualityTitle: String
     val videoQualityDescription: String
     fun qualityLabel(key: String): String
+    val apngFormatTitle: String
+    val apngFormatDescription: String
+    fun apngFormatLabel(key: String): String
+    val customThemeTitle: String
+    val customThemeDescription: String
+    val themeAccentTitle: String
+    val themeBackgroundTitle: String
+    val themeSurfaceTitle: String
+    val themeReset: String
+    val themeHexLabel: String
+    val themeHexInvalid: String
+    val themeHexApply: String
+    val darkThemeLockedByCustom: String
+    val themePickerOpen: String
+    val themePickerCancel: String
+    val themeTextTitle: String
+    val themeTextAuto: String
+    val themeTextLowContrast: String
+    val dtextSectionDefault: String
+    val dtextSpoilerHint: String
 }
 
 val LocalStrings = staticCompositionLocalOf<AppStrings> { KoStrings }
