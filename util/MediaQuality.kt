@@ -23,12 +23,30 @@ object MediaUrlResolver {
         return if (isSaving && quality.ordinal < cap.ordinal) cap else quality
     }
 
+    private val APNG_TAGS = setOf("animated_png", "apng")
+
+    fun isTaggedApng(post: Post): Boolean {
+        if (post.file?.ext?.lowercase() != "png") return false
+        val tags = post.allTags()
+        return tags.contains("animated") || tags.any { it in APNG_TAGS }
+    }
+
+    fun displayExtension(post: Post, isApngFile: Boolean = false): String {
+        val ext = post.file?.ext?.lowercase() ?: return ""
+        return if (ext == "png" && (isApngFile || isTaggedApng(post))) "apng" else ext
+    }
+
+    fun hasMotion(post: Post): Boolean {
+        val ext = post.file?.ext?.lowercase() ?: return false
+        return ext == "gif" || ext == "webm" || ext == "mp4" || ext == "png" || ext == "webp"
+    }
+
     fun isAnimatedImage(post: Post): Boolean {
         val ext = post.file?.ext?.lowercase() ?: return false
         if (ext == "gif") return true
         if (ext != "png" && ext != "webp") return false
         val tags = post.allTags()
-        return tags.contains("animated") || tags.contains("animated_png") || tags.contains("animated_webp")
+        return tags.contains("animated") || tags.any { it in APNG_TAGS } || tags.contains("animated_webp")
     }
 
     fun imageSource(post: Post, quality: MediaQuality): ImageSource? {
